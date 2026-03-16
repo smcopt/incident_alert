@@ -1,62 +1,79 @@
 import os
+import json
+import time
 import base64
 import requests
 import google.auth
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from googleapiclient.discovery import build
 
 # --- CONFIGURATION ---
-# Replace these with your actual details
 SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
 SENDER_EMAIL = 'info@smcopt.org'
-RECIPIENT_EMAIL = 'sujanpaudel@iom.int' # or whoever should receive the summary
-API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=2137&key=7kq1bSino0AcI86hIFbmM6mmTU425121134211' # Replace with your real API
+RECIPIENT_EMAIL = 'sujanpaudel@iom.int' 
+API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=2137&key=7kq1bSino0AcI86hIFbmM6mmTU425121134211' 
+
+# ADD YOUR NEW SERVICE ACCOUNT EMAIL HERE:
+SERVICE_ACCOUNT_EMAIL = 'incident-alert@incidentalert-490412.iam.gserviceaccount.com'
 
 def run_workflow(request):
-    """Main function triggered by Cloud Scheduler."""
     try:
-        # 1. Identity-based Authentication
-        # No credentials.json needed! The Cloud Function "is" the Service Account.
-        scopes = [
-            'https://www.googleapis.com/auth/spreadsheets',
-            'https://www.googleapis.com/auth/gmail.send'
-        ]
+        # 1. Base Keyless Authentication for Google Sheets
+        scopes = ['https://www.googleapis.com/auth/spreadsheets']
         creds, project = google.auth.default(scopes=scopes)
-        
-        # To send as info@smcopt.org, we "impersonate" that user
-        # This requires Domain-Wide Delegation set in Google Admin
-        delegated_creds = creds.with_subject(SENDER_EMAIL)
-        
         sheet_service = build('sheets', 'v4', credentials=creds)
-        gmail_service = build('gmail', 'v1', credentials=delegated_creds)
 
-        # 2. Get Existing Data (Column A) to prevent duplicates
+        # 2. Advanced Keyless Authentication for Gmail (Domain-Wide Delegation)
+        creds.refresh(Request())
+        jwt_payload = json.dumps({
+            "iss": SERVICE_ACCOUNT_EMAIL,
+            "sub": SENDER_EMAIL,
+            "scope": "https://www.googleapis.com/auth/gmail.send",
+            "aud": "https://oauth2.googleapis.com/token",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600
+        })
+        
+        # Ask Google IAM to securely sign the token
+        iam_url = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{SERVICE_ACCOUNT_EMAIL}:signJwt"
+        iam_headers = {"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"}
+        signed_jwt = requests.post(iam_url, headers=iam_headers, json={"payload": jwt_payload}).json().get('signedJwt')
+        
+        # Exchange for Gmail Access Token
+        oauth_res = requests.post("https://oauth2.googleapis.com/token", data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": signed_jwt
+        }).json()
+        
+        gmail_creds = Credentials(oauth_res['access_token'])
+        gmail_service = build('gmail', 'v1', credentials=gmail_creds)
+
+        # 3. Get Existing Data
         result = sheet_service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID, range="Sheet1!A:A").execute()
         existing_ids = set([row[0] for row in result.get('values', []) if row])
 
-        # 3. Fetch API Data
+        # 4. Fetch API Data
         response = requests.get(API_URL)
         api_data = response.json() 
 
         new_records = []
         for item in api_data:
-            # Assuming your API uses 'id' as a unique field
             if str(item.get('id')) not in existing_ids:
-                # Format for the Sheet: ID, Date, Description
                 new_rows = [item.get('id'), item.get('date'), item.get('description')]
                 new_records.append(new_rows)
 
-        # 4. Update Sheet & Send Email
+        # 5. Update Sheet & Send Email
         if new_records:
             sheet_service.spreadsheets().values().append(
                 spreadsheetId=SPREADSHEET_ID,
                 range="Sheet1!A1",
-                valueInputOption="RAW", # Hard Paste
+                valueInputOption="RAW",
                 body={"values": new_records}
             ).execute()
-            
             send_beautified_email(gmail_service, new_records)
         else:
             send_beautified_email(gmail_service, None)
@@ -68,7 +85,6 @@ def run_workflow(request):
         return f"Error: {e}", 500
 
 def send_beautified_email(service, new_rows):
-    """Constructs the HTML email based on your preferred style."""
     message = MIMEMultipart()
     message['to'] = RECIPIENT_EMAIL
     message['from'] = SENDER_EMAIL
@@ -92,7 +108,6 @@ def send_beautified_email(service, new_rows):
             {rows}
         </table>"""
 
-    # The "Cluster" Styled Template
     html_content = f"""
     <div style="max-width: 600px; margin: auto; border: 1px solid #ddd; font-family: Arial, sans-serif;">
         <div style="background-color: #2b7a91; padding: 30px; text-align: center; color: white;">
@@ -109,7 +124,6 @@ def send_beautified_email(service, new_rows):
         </div>
     </div>
     """
-    
     message.attach(MIMEText(html_content, 'html'))
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
     service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
