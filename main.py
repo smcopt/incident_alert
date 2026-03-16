@@ -66,7 +66,7 @@ def run_workflow(request):
 
         # 3. Get Existing Data
         result = sheet_service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID, range="Sheet1!A:A").execute()
+            spreadsheetId=SPREADSHEET_ID, range="ALERT!A:A").execute()
         existing_ids = set([row[0] for row in result.get('values', []) if row])
 
         # 4. Fetch API Data
