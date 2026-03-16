@@ -83,7 +83,7 @@ def run_workflow(request):
         if new_records:
             sheet_service.spreadsheets().values().append(
                 spreadsheetId=SPREADSHEET_ID,
-                range="Sheet1!A1",
+                range="ALERT!A1",
                 valueInputOption="RAW",
                 body={"values": new_records}
             ).execute()
