@@ -75,10 +75,18 @@ def run_workflow(request):
 
         new_records = []
         for item in api_data:
-            if str(item.get('id')) not in existing_ids:
-                new_rows = [item.get('id'), item.get('date'), item.get('description')]
+            # We must use the exact string names from your JSON
+            case_id = str(item.get('Case Id', ''))
+            
+            if case_id and case_id not in existing_ids:
+                date = item.get('Details of Alert-Date of the incident  [Most Recent]', 'N/A')
+                site = item.get('Site Name', 'N/A')
+                incident_type = item.get('Event Information-What was the main incident? [Most Recent] ', 'N/A')
+                details = item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A')
+                
+                # Order matters here! This is how it goes into Google Sheets: Col A, B, C, D, E
+                new_rows = [case_id, date, site, incident_type, details]
                 new_records.append(new_rows)
-
         # 5. Update Sheet & Send Email
         if new_records:
             sheet_service.spreadsheets().values().append(
@@ -106,6 +114,24 @@ def send_beautified_email(service, new_rows):
     if not new_rows:
         status_msg = "No incidents reported today."
         table_html = "<p style='color: #666;'>Systems are clear. No new submissions detected.</p>"
+    else:
+        status_msg = f"Action Required: {len(new_rows)} New Incidents"
+        rows = ""
+        for r in new_rows:
+            # Mapping our 5 columns into HTML table rows
+            rows += f"<tr><td style='padding:10px; border-bottom:1px solid #eee;'>{r[0]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[1]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[2]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[3]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[4]}</td></tr>"
+        
+        table_html = f"""
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px;">
+            <tr style="background-color: #f8f8f8; text-align: left;">
+                <th style="padding: 10px;">Case ID</th>
+                <th style="padding: 10px;">Date</th>
+                <th style="padding: 10px;">Site</th>
+                <th style="padding: 10px;">Type</th>
+                <th style="padding: 10px;">Details</th>
+            </tr>
+            {rows}
+        </table>"""
     else:
         status_msg = f"Action Required: {len(new_rows)} New Incidents"
         rows = ""
