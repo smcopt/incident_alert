@@ -1,89 +1,111 @@
 import os
 import base64
 import requests
+import google.auth
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from googleapiclient.discovery import build
-from google.oauth2 import service_account
 
 # --- CONFIGURATION ---
-SPREADSHEET_ID = 'YOUR_GOOGLE_SHEET_ID_HERE'
+# Replace these with your actual details
+SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
 SENDER_EMAIL = 'info@smcopt.org'
-API_URL = 'https://your-api-endpoint.com/data'
-SERVICE_ACCOUNT_FILE = 'credentials.json'
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/gmail.send'
-]
+RECIPIENT_EMAIL = 'sujanpaudel@iom.int' # or whoever should receive the summary
+API_URL = 'https://api.smcopt.org/v1/incidents' # Replace with your real API
 
 def run_workflow(request):
-    # 1. Authenticate
-    creds = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-    # Important: To send as info@smcopt.org, the Service Account needs 
-    # Domain-Wide Delegation, or simply share the sheet with it.
-    sheet_service = build('sheets', 'v4', credentials=creds)
-    gmail_service = build('gmail', 'v1', credentials=creds)
-
-    # 2. Get Existing Data (Column A usually holds the Unique ID)
-    result = sheet_service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID, range="A:A").execute()
-    existing_ids = [row[0] for row in result.get('values', []) if row]
-
-    # 3. Fetch API Data
-    response = requests.get(API_URL)
-    api_data = response.json() 
-
-    new_records = []
-    for item in api_data:
-        if str(item['id']) not in existing_ids:
-            # Preparing row for Google Sheet (adjust keys based on your API)
-            new_records.append([item['id'], item['date'], item['description'], item['status']])
-
-    # 4. Update Sheet & Send Email
-    if new_records:
-        # Append to Sheet
-        sheet_service.spreadsheets().values().append(
-            spreadsheetId=SPREADSHEET_ID,
-            range="Sheet1!A1",
-            valueInputOption="USER_ENTERED",
-            body={"values": new_records}
-        ).execute()
+    """Main function triggered by Cloud Scheduler."""
+    try:
+        # 1. Identity-based Authentication
+        # No credentials.json needed! The Cloud Function "is" the Service Account.
+        scopes = [
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/gmail.send'
+        ]
+        creds, project = google.auth.default(scopes=scopes)
         
-        send_email(gmail_service, new_records)
-    else:
-        send_email(gmail_service, None)
+        # To send as info@smcopt.org, we "impersonate" that user
+        # This requires Domain-Wide Delegation set in Google Admin
+        delegated_creds = creds.with_subject(SENDER_EMAIL)
+        
+        sheet_service = build('sheets', 'v4', credentials=creds)
+        gmail_service = build('gmail', 'v1', credentials=delegated_creds)
 
-    return "Process Completed", 200
+        # 2. Get Existing Data (Column A) to prevent duplicates
+        result = sheet_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID, range="Sheet1!A:A").execute()
+        existing_ids = set([row[0] for row in result.get('values', []) if row])
 
-def send_email(service, new_rows):
+        # 3. Fetch API Data
+        response = requests.get(API_URL)
+        api_data = response.json() 
+
+        new_records = []
+        for item in api_data:
+            # Assuming your API uses 'id' as a unique field
+            if str(item.get('id')) not in existing_ids:
+                # Format for the Sheet: ID, Date, Description
+                new_rows = [item.get('id'), item.get('date'), item.get('description')]
+                new_records.append(new_rows)
+
+        # 4. Update Sheet & Send Email
+        if new_records:
+            sheet_service.spreadsheets().values().append(
+                spreadsheetId=SPREADSHEET_ID,
+                range="Sheet1!A1",
+                valueInputOption="RAW", # Hard Paste
+                body={"values": new_records}
+            ).execute()
+            
+            send_beautified_email(gmail_service, new_records)
+        else:
+            send_beautified_email(gmail_service, None)
+
+        return "Success", 200
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return f"Error: {e}", 500
+
+def send_beautified_email(service, new_rows):
+    """Constructs the HTML email based on your preferred style."""
     message = MIMEMultipart()
-    message['to'] = 'recipient@smcopt.org' # Who gets the summary?
+    message['to'] = RECIPIENT_EMAIL
     message['from'] = SENDER_EMAIL
-    message['subject'] = "Daily Incident Report - SM Cluster"
+    message['subject'] = "Daily Incident Summary - SM Cluster"
 
-    # HTML Beautification logic (matching your screenshot style)
     if not new_rows:
         status_msg = "No incidents reported today."
-        table_html = "<p style='color: #666;'>Systems are clear.</p>"
+        table_html = "<p style='color: #666;'>Systems are clear. No new submissions detected.</p>"
     else:
         status_msg = f"Action Required: {len(new_rows)} New Incidents"
-        rows = "".join([f"<tr><td style='padding:8px; border-bottom:1px solid #eee;'>{r[0]}</td><td style='padding:8px; border-bottom:1px solid #eee;'>{r[2]}</td></tr>" for r in new_rows])
-        table_html = f"<table style='width:100%; border-collapse:collapse;'>{rows}</table>"
+        rows = ""
+        for r in new_rows:
+            rows += f"<tr><td style='padding:10px; border-bottom:1px solid #eee;'>{r[0]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[2]}</td></tr>"
+        
+        table_html = f"""
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+            <tr style="background-color: #f8f8f8; text-align: left;">
+                <th style="padding: 10px;">ID</th>
+                <th style="padding: 10px;">Description</th>
+            </tr>
+            {rows}
+        </table>"""
 
+    # The "Cluster" Styled Template
     html_content = f"""
-    <div style="font-family: Arial, sans-serif; border: 1px solid #ddd; max-width: 600px;">
-        <div style="background-color: #2b7a91; color: white; padding: 20px; text-align: center;">
-            <h2 style="margin:0;">INCIDENT MANAGEMENT SYSTEM</h2>
-            <p style="margin:0; font-size: 12px;">SITE MANAGEMENT CLUSTER</p>
+    <div style="max-width: 600px; margin: auto; border: 1px solid #ddd; font-family: Arial, sans-serif;">
+        <div style="background-color: #2b7a91; padding: 30px; text-align: center; color: white;">
+            <h2 style="margin: 0;">INCIDENT MANAGEMENT SYSTEM</h2>
+            <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">SITE MANAGEMENT CLUSTER</p>
         </div>
-        <div style="padding: 20px;">
-            <h3 style="color: #2b7a91;">{status_msg}</h3>
+        <div style="padding: 40px 30px;">
+            <h2 style="color: #2b7a91; margin-top: 0;">{status_msg}</h2>
             {table_html}
-            <p>Reported at: 06:00 AM Amman Time</p>
+            <p style="margin-top: 30px;">This is an automated report generated at 06:00 AM Amman Time.</p>
         </div>
-        <div style="background-color: #333; color: white; padding: 10px; text-align: center; font-size: 10px;">
-            © 2026 SM Cluster
+        <div style="background-color: #333; color: #ccc; padding: 20px; text-align: center; font-size: 12px;">
+            © 2026 Site Management Cluster
         </div>
     </div>
     """
