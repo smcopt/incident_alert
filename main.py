@@ -24,7 +24,7 @@ def run_workflow(request):
         # 1. Base Keyless Authentication for Google Sheets & IAM
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
-            'https://www.googleapis.com/auth/cloud-platform' # Added this to allow IAM signing!
+            'https://www.googleapis.com/auth/cloud-platform' 
         ]
         creds, project = google.auth.default(scopes=scopes)
         creds.refresh(Request())
@@ -75,7 +75,6 @@ def run_workflow(request):
 
         new_records = []
         for item in api_data:
-            # We must use the exact string names from your JSON
             case_id = str(item.get('Case Id', ''))
             
             if case_id and case_id not in existing_ids:
@@ -84,9 +83,10 @@ def run_workflow(request):
                 incident_type = item.get('Event Information-What was the main incident? [Most Recent] ', 'N/A')
                 details = item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A')
                 
-                # Order matters here! This is how it goes into Google Sheets: Col A, B, C, D, E
+                # Format: Case ID, Date, Site, Type, Details
                 new_rows = [case_id, date, site, incident_type, details]
                 new_records.append(new_rows)
+                
         # 5. Update Sheet & Send Email
         if new_records:
             sheet_service.spreadsheets().values().append(
@@ -129,20 +129,6 @@ def send_beautified_email(service, new_rows):
                 <th style="padding: 10px;">Site</th>
                 <th style="padding: 10px;">Type</th>
                 <th style="padding: 10px;">Details</th>
-            </tr>
-            {rows}
-        </table>"""
-    else:
-        status_msg = f"Action Required: {len(new_rows)} New Incidents"
-        rows = ""
-        for r in new_rows:
-            rows += f"<tr><td style='padding:10px; border-bottom:1px solid #eee;'>{r[0]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[2]}</td></tr>"
-        
-        table_html = f"""
-        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-            <tr style="background-color: #f8f8f8; text-align: left;">
-                <th style="padding: 10px;">ID</th>
-                <th style="padding: 10px;">Description</th>
             </tr>
             {rows}
         </table>"""
