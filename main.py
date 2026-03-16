@@ -11,7 +11,7 @@ from googleapiclient.discovery import build
 SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
 SENDER_EMAIL = 'info@smcopt.org'
 RECIPIENT_EMAIL = 'sujanpaudel@iom.int' # or whoever should receive the summary
-API_URL = 'https://api.smcopt.org/v1/incidents' # Replace with your real API
+API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=2137&key=7kq1bSino0AcI86hIFbmM6mmTU425121134211' # Replace with your real API
 
 def run_workflow(request):
     """Main function triggered by Cloud Scheduler."""
