@@ -21,13 +21,16 @@ SERVICE_ACCOUNT_EMAIL = 'incident-alert@incidentalert-490412.iam.gserviceaccount
 
 def run_workflow(request):
     try:
-        # 1. Base Keyless Authentication for Google Sheets
-        scopes = ['https://www.googleapis.com/auth/spreadsheets']
+        # 1. Base Keyless Authentication for Google Sheets & IAM
+        scopes = [
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/cloud-platform' # Added this to allow IAM signing!
+        ]
         creds, project = google.auth.default(scopes=scopes)
+        creds.refresh(Request())
         sheet_service = build('sheets', 'v4', credentials=creds)
 
         # 2. Advanced Keyless Authentication for Gmail (Domain-Wide Delegation)
-        creds.refresh(Request())
         jwt_payload = json.dumps({
             "iss": SERVICE_ACCOUNT_EMAIL,
             "sub": SENDER_EMAIL,
@@ -40,7 +43,13 @@ def run_workflow(request):
         # Ask Google IAM to securely sign the token
         iam_url = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{SERVICE_ACCOUNT_EMAIL}:signJwt"
         iam_headers = {"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"}
-        signed_jwt = requests.post(iam_url, headers=iam_headers, json={"payload": jwt_payload}).json().get('signedJwt')
+        iam_response = requests.post(iam_url, headers=iam_headers, json={"payload": jwt_payload}).json()
+        
+        # TRAP 1: Did IAM refuse to sign it?
+        if 'error' in iam_response:
+            raise Exception(f"IAM Signing Error: {iam_response['error']}")
+            
+        signed_jwt = iam_response.get('signedJwt')
         
         # Exchange for Gmail Access Token
         oauth_res = requests.post("https://oauth2.googleapis.com/token", data={
@@ -48,6 +57,10 @@ def run_workflow(request):
             "assertion": signed_jwt
         }).json()
         
+        # TRAP 2: Did Gmail refuse the Domain-Wide Delegation?
+        if 'error' in oauth_res:
+            raise Exception(f"Gmail OAuth Error: {oauth_res.get('error_description', oauth_res)}")
+            
         gmail_creds = Credentials(oauth_res['access_token'])
         gmail_service = build('gmail', 'v1', credentials=gmail_creds)
 
