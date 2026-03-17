@@ -16,7 +16,6 @@ SENDER_EMAIL = 'info@smcopt.org'
 RECIPIENT_EMAIL = 'sujanpaudel@iom.int' 
 API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=2137&key=7kq1bSino0AcI86hIFbmM6mmTU425121134211' 
 
-# ADD YOUR NEW SERVICE ACCOUNT EMAIL HERE:
 SERVICE_ACCOUNT_EMAIL = 'incident-alert@incidentalert-490412.iam.gserviceaccount.com'
 
 def run_workflow(request):
@@ -30,7 +29,7 @@ def run_workflow(request):
         creds.refresh(Request())
         sheet_service = build('sheets', 'v4', credentials=creds)
 
-        # 2. Advanced Keyless Authentication for Gmail (Domain-Wide Delegation)
+        # 2. Advanced Keyless Authentication for Gmail
         jwt_payload = json.dumps({
             "iss": SERVICE_ACCOUNT_EMAIL,
             "sub": SENDER_EMAIL,
@@ -39,25 +38,19 @@ def run_workflow(request):
             "iat": int(time.time()),
             "exp": int(time.time()) + 3600
         })
-        
-        # Ask Google IAM to securely sign the token
         iam_url = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{SERVICE_ACCOUNT_EMAIL}:signJwt"
         iam_headers = {"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"}
         iam_response = requests.post(iam_url, headers=iam_headers, json={"payload": jwt_payload}).json()
         
-        # TRAP 1: Did IAM refuse to sign it?
         if 'error' in iam_response:
             raise Exception(f"IAM Signing Error: {iam_response['error']}")
             
         signed_jwt = iam_response.get('signedJwt')
-        
-        # Exchange for Gmail Access Token
         oauth_res = requests.post("https://oauth2.googleapis.com/token", data={
             "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
             "assertion": signed_jwt
         }).json()
         
-        # TRAP 2: Did Gmail refuse the Domain-Wide Delegation?
         if 'error' in oauth_res:
             raise Exception(f"Gmail OAuth Error: {oauth_res.get('error_description', oauth_res)}")
             
@@ -73,29 +66,48 @@ def run_workflow(request):
         response = requests.get(API_URL)
         api_data = response.json() 
 
-        new_records = []
-        for item in api_data:
-            case_id = str(item.get('Case Id', ''))
+        new_records_for_sheet = []
+        new_records_for_email = []
+
+        if api_data:
+            # Dynamically grab all column headers from the API
+            all_keys = list(api_data[0].keys())
             
-            if case_id and case_id not in existing_ids:
-                date = item.get('Details of Alert-Date of the incident  [Most Recent]', 'N/A')
-                site = item.get('Site Name', 'N/A')
-                incident_type = item.get('Event Information-What was the main incident? [Most Recent] ', 'N/A')
-                details = item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A')
+            # Force 'Case Id' to always be Column A so our duplicate checker works
+            if 'Case Id' in all_keys:
+                all_keys.remove('Case Id')
+                all_keys.insert(0, 'Case Id')
+
+            # If the sheet is 100% empty, write the raw API headers as Row 1
+            if not existing_ids:
+                new_records_for_sheet.append(all_keys)
+
+            for item in api_data:
+                case_id = str(item.get('Case Id', ''))
                 
-                # Format: Case ID, Date, Site, Type, Details
-                new_rows = [case_id, date, site, incident_type, details]
-                new_records.append(new_rows)
+                if case_id and case_id not in existing_ids:
+                    # Append ALL fields to the Google Sheet based on column position
+                    row_data = [str(item.get(key, '')) for key in all_keys]
+                    new_records_for_sheet.append(row_data)
+
+                    # Append only the 5 summary fields for the Email
+                    email_date = item.get('Details of Alert-Date of the incident  [Most Recent]', 'N/A')
+                    email_site = item.get('Site Name', 'N/A')
+                    email_type = item.get('Event Information-What was the main incident? [Most Recent] ', 'N/A')
+                    email_details = item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A')
+                    new_records_for_email.append([case_id, email_date, email_site, email_type, email_details])
                 
         # 5. Update Sheet & Send Email
-        if new_records:
+        if new_records_for_sheet:
             sheet_service.spreadsheets().values().append(
                 spreadsheetId=SPREADSHEET_ID,
                 range="ALERT!A1",
                 valueInputOption="RAW",
-                body={"values": new_records}
+                body={"values": new_records_for_sheet}
             ).execute()
-            send_beautified_email(gmail_service, new_records)
+            
+        if new_records_for_email:
+            send_beautified_email(gmail_service, new_records_for_email)
         else:
             send_beautified_email(gmail_service, None)
 
@@ -118,7 +130,6 @@ def send_beautified_email(service, new_rows):
         status_msg = f"Action Required: {len(new_rows)} New Incidents"
         rows = ""
         for r in new_rows:
-            # Mapping our 5 columns into HTML table rows
             rows += f"<tr><td style='padding:10px; border-bottom:1px solid #eee;'>{r[0]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[1]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[2]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[3]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[4]}</td></tr>"
         
         table_html = f"""
