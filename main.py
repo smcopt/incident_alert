@@ -70,15 +70,20 @@ def run_workflow(request):
         new_records_for_email = []
 
         if api_data:
-            # Dynamically grab all column headers from the API
-            all_keys = list(api_data[0].keys())
+            # 1. Scan ALL incidents to find every possible column header 
+            # (Ensures we don't miss Repeat Group columns if the first incident is missing them)
+            all_keys = []
+            for item in api_data:
+                for k in item.keys():
+                    if k not in all_keys:
+                        all_keys.append(k)
             
-            # Force 'Case Id' to always be Column A so our duplicate checker works
+            # Force 'Case Id' to always be Column A
             if 'Case Id' in all_keys:
                 all_keys.remove('Case Id')
                 all_keys.insert(0, 'Case Id')
 
-            # If the sheet is 100% empty, write the raw API headers as Row 1
+            # If the sheet is empty, write the headers as Row 1
             if not existing_ids:
                 new_records_for_sheet.append(all_keys)
 
@@ -86,8 +91,31 @@ def run_workflow(request):
                 case_id = str(item.get('Case Id', ''))
                 
                 if case_id and case_id not in existing_ids:
-                    # Append ALL fields to the Google Sheet based on column position
-                    row_data = [str(item.get(key, '')) for key in all_keys]
+                    # 2. Append ALL fields, flattening repeat groups into single cells
+                    row_data = []
+                    for key in all_keys:
+                        val = item.get(key, '')
+                        
+                        # Flatten Repeat Groups (Lists/Arrays)
+                        if isinstance(val, list):
+                            flat_list = []
+                            for sub_item in val:
+                                if isinstance(sub_item, dict):
+                                    extracted = [str(v) for v in sub_item.values() if v]
+                                    flat_list.append(", ".join(extracted))
+                                else:
+                                    flat_list.append(str(sub_item))
+                            # Join multiple photos with a newline so they stack nicely in the cell
+                            row_data.append("\n".join(flat_list))
+                        
+                        # Flatten nested dictionaries
+                        elif isinstance(val, dict):
+                            row_data.append(json.dumps(val))
+                            
+                        # Standard text or number
+                        else:
+                            row_data.append(str(val))
+                            
                     new_records_for_sheet.append(row_data)
 
                     # Append only the 5 summary fields for the Email
