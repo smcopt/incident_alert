@@ -3,11 +3,16 @@ import json
 import time
 import base64
 import requests
+import io
+import pandas as pd
+from datetime import datetime
 import google.auth
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 from googleapiclient.discovery import build
 
 # --- CONFIGURATION ---
@@ -15,12 +20,14 @@ SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
 SENDER_EMAIL = 'info@smcopt.org'
 RECIPIENT_EMAIL = 'sujanpaudel@iom.int' 
 API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=2137&key=7kq1bSino0AcI86hIFbmM6mmTU425121134211' 
-
 SERVICE_ACCOUNT_EMAIL = 'incident-alert@incidentalert-490412.iam.gserviceaccount.com'
+
+# PASTE YOUR GITHUB RAW LOGO URL HERE:
+LOGO_URL = 'https://raw.githubusercontent.com/smcopt/incident_alert/main/CountryLogo_Palestine_V01.png'
 
 def run_workflow(request):
     try:
-        # 1. Base Keyless Authentication for Google Sheets & IAM
+        # 1. Base Keyless Authentication
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/cloud-platform' 
@@ -29,7 +36,7 @@ def run_workflow(request):
         creds.refresh(Request())
         sheet_service = build('sheets', 'v4', credentials=creds)
 
-        # 2. Advanced Keyless Authentication for Gmail
+        # 2. Gmail Domain-Wide Delegation
         jwt_payload = json.dumps({
             "iss": SERVICE_ACCOUNT_EMAIL,
             "sub": SENDER_EMAIL,
@@ -57,7 +64,7 @@ def run_workflow(request):
         gmail_creds = Credentials(oauth_res['access_token'])
         gmail_service = build('gmail', 'v1', credentials=gmail_creds)
 
-        # 3. Get Existing Data
+        # 3. Get Existing Data to Prevent Duplicates
         result = sheet_service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID, range="ALERT!A:A").execute()
         existing_ids = set([row[0] for row in result.get('values', []) if row])
@@ -68,11 +75,10 @@ def run_workflow(request):
 
         new_records_for_sheet = []
         new_records_for_email = []
+        all_keys = []
 
         if api_data:
-            # 1. Scan ALL incidents to find every possible column header 
-            # (Ensures we don't miss Repeat Group columns if the first incident is missing them)
-            all_keys = []
+            # Dynamically grab all column headers for Excel/Sheets
             for item in api_data:
                 for k in item.keys():
                     if k not in all_keys:
@@ -83,7 +89,6 @@ def run_workflow(request):
                 all_keys.remove('Case Id')
                 all_keys.insert(0, 'Case Id')
 
-            # If the sheet is empty, write the headers as Row 1
             if not existing_ids:
                 new_records_for_sheet.append(all_keys)
 
@@ -91,39 +96,31 @@ def run_workflow(request):
                 case_id = str(item.get('Case Id', ''))
                 
                 if case_id and case_id not in existing_ids:
-                    # 2. Append ALL fields, flattening repeat groups into single cells
-                    row_data = []
-                    for key in all_keys:
-                        val = item.get(key, '')
-                        
-                        # Flatten Repeat Groups (Lists/Arrays)
-                        if isinstance(val, list):
-                            flat_list = []
-                            for sub_item in val:
-                                if isinstance(sub_item, dict):
-                                    extracted = [str(v) for v in sub_item.values() if v]
-                                    flat_list.append(", ".join(extracted))
-                                else:
-                                    flat_list.append(str(sub_item))
-                            # Join multiple photos with a newline so they stack nicely in the cell
-                            row_data.append("\n".join(flat_list))
-                        
-                        # Flatten nested dictionaries
-                        elif isinstance(val, dict):
-                            row_data.append(json.dumps(val))
-                            
-                        # Standard text or number
-                        else:
-                            row_data.append(str(val))
-                            
+                    # Append ALL fields for Sheet/Excel
+                    row_data = [str(item.get(key, '')) for key in all_keys]
                     new_records_for_sheet.append(row_data)
 
-                    # Append only the 5 summary fields for the Email
-                    email_date = item.get('Details of Alert-Date of the incident  [Most Recent]', 'N/A')
-                    email_site = item.get('Site Name', 'N/A')
-                    email_type = item.get('Event Information-What was the main incident? [Most Recent] ', 'N/A')
-                    email_details = item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A')
-                    new_records_for_email.append([case_id, email_date, email_site, email_type, email_details])
+                    # Create a structured dictionary of the 17 fields for the Email Cards
+                    email_incident = {
+                        "Site ID": item.get('Site ID', 'N/A'),
+                        "Site Name": item.get('Site Name', 'N/A'),
+                        "Site Name (Arabic)": item.get('Site Information/Site Name (Arabic)', 'N/A'),
+                        "Governorate": item.get('Site Information/First Level Region Name', 'N/A'),
+                        "Neighborhood": item.get('Site Information/Second Level Region Name', 'N/A'),
+                        "Agency Name": item.get('Site Information/Site Type', 'N/A'),
+                        "Reporter": item.get('Details of Alert-Name of Person Completing the Form [Most Recent]', 'N/A'),
+                        "Contact": item.get("Details of Alert-Please provide the reporter's contact information in case we need to follow up. [Most Recent]", 'N/A'),
+                        "Incident": item.get('Event Information-What was the main incident? [Most Recent] ', 'N/A'),
+                        "Details": item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A'),
+                        "Ind_Affected": str(item.get('Impact of Incident-Individuals affected [Most Recent]', '0')),
+                        "HH_Affected": str(item.get('Impact of Incident-Households affected [Most Recent]', '0')),
+                        "Shelters_Destroyed": str(item.get('Impact of Incident-Number of Shelters Completely Damaged [Most Recent]', '0')),
+                        "Shelters_Damaged": str(item.get('Impact of Incident-Number of Shelters Partially Damaged: [Most Recent]', '0')),
+                        "Sleeping_Outside": str(item.get('Impact of Incident-Number of Households sleeping outside of shelter: [Most Recent]', '0')),
+                        "Quantities": item.get('Top Needs-Quantities Required for Support [Most Recent]', 'N/A'),
+                        "URL": item.get('Url', '#')
+                    }
+                    new_records_for_email.append(email_incident)
                 
         # 5. Update Sheet & Send Email
         if new_records_for_sheet:
@@ -134,8 +131,9 @@ def run_workflow(request):
                 body={"values": new_records_for_sheet}
             ).execute()
             
-        if new_records_for_email:
-            send_beautified_email(gmail_service, new_records_for_email)
+            # Send the data to the email logic
+            data_to_excel = new_records_for_sheet[1:] if not existing_ids else new_records_for_sheet
+            send_beautified_email(gmail_service, new_records_for_email, full_data=data_to_excel, headers=all_keys)
         else:
             send_beautified_email(gmail_service, None)
 
@@ -145,49 +143,132 @@ def run_workflow(request):
         print(f"Error: {e}")
         return f"Error: {e}", 500
 
-def send_beautified_email(service, new_rows):
+def send_beautified_email(service, summary_data, full_data=None, headers=None):
     message = MIMEMultipart()
     message['to'] = RECIPIENT_EMAIL
     message['from'] = SENDER_EMAIL
     message['subject'] = "Daily Incident Summary - SM Cluster"
 
-    if not new_rows:
-        status_msg = "No incidents reported today."
-        table_html = "<p style='color: #666;'>Systems are clear. No new submissions detected.</p>"
-    else:
-        status_msg = f"Action Required: {len(new_rows)} New Incidents"
-        rows = ""
-        for r in new_rows:
-            rows += f"<tr><td style='padding:10px; border-bottom:1px solid #eee;'>{r[0]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[1]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[2]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[3]}</td><td style='padding:10px; border-bottom:1px solid #eee;'>{r[4]}</td></tr>"
-        
-        table_html = f"""
-        <table style="width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px;">
-            <tr style="background-color: #f8f8f8; text-align: left;">
-                <th style="padding: 10px;">Case ID</th>
-                <th style="padding: 10px;">Date</th>
-                <th style="padding: 10px;">Site</th>
-                <th style="padding: 10px;">Type</th>
-                <th style="padding: 10px;">Details</th>
-            </tr>
-            {rows}
-        </table>"""
+    # --- ATTACH EXCEL IF WE HAVE DATA ---
+    if full_data and headers:
+        df = pd.DataFrame(full_data, columns=headers)
+        excel_buffer = io.BytesIO()
+        df.to_excel(excel_buffer, index=False, engine='openpyxl')
+        excel_buffer.seek(0)
 
-    html_content = f"""
-    <div style="max-width: 600px; margin: auto; border: 1px solid #ddd; font-family: Arial, sans-serif;">
-        <div style="background-color: #2b7a91; padding: 30px; text-align: center; color: white;">
-            <h2 style="margin: 0;">INCIDENT MANAGEMENT SYSTEM</h2>
-            <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">SITE MANAGEMENT CLUSTER</p>
+        current_date = datetime.now().strftime("%d-%m-%Y")
+        filename = f"SMC Site Alert - {current_date}.xlsx"
+        
+        part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        part.set_payload(excel_buffer.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+        message.attach(part)
+
+    # --- BUILD BEAUTIFIED HTML EMAIL (CARD LAYOUT) ---
+    if not summary_data:
+        status_msg = "No incidents reported today."
+        content_html = "<p style='color: #666; font-size: 16px; padding: 20px; text-align: center;'>Systems are clear. No new submissions detected.</p>"
+    else:
+        status_msg = f"Action Required: {len(summary_data)} New Incidents"
+        content_html = ""
+        
+        # Build an HTML card for each incident
+        for r in summary_data:
+            content_html += f"""
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; font-family: Arial, sans-serif; background-color: #ffffff;">
+                <tr>
+                    <td style="padding: 15px; border-bottom: 1px solid #ddd; background-color: #f9f9f9; border-radius: 8px 8px 0 0;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td align="left">
+                                    <h3 style="margin: 0; color: #2b7a91; font-size: 18px;">{r.get('Site ID')} - {r.get('Site Name')}</h3>
+                                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #666;">{r.get('Governorate')} - {r.get('Neighborhood')}</p>
+                                </td>
+                                <td align="right" valign="top">
+                                    <span style="display: inline-block; padding: 6px 10px; background-color: #ffeaea; color: #d9534f; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Incident')}</span>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 15px;">
+                        <table width="100%" cellpadding="6" cellspacing="0" style="font-size: 13px;">
+                            <tr>
+                                <td width="25%" style="color: #666;"><strong>Site Name (Ar):</strong></td>
+                                <td width="25%" style="color: #333;">{r.get('Site Name (Arabic)')}</td>
+                                <td width="25%" style="color: #666;"><strong>Agency:</strong></td>
+                                <td width="25%" style="color: #333;">{r.get('Agency Name')}</td>
+                            </tr>
+                            <tr>
+                                <td style="color: #666;"><strong>Reporter:</strong></td>
+                                <td style="color: #333;">{r.get('Reporter')}</td>
+                                <td style="color: #666;"><strong>Contact:</strong></td>
+                                <td style="color: #333;">{r.get('Contact')}</td>
+                            </tr>
+                            <tr>
+                                <td style="color: #666;"><strong>Ind. Affected:</strong></td>
+                                <td style="color: #333;">{r.get('Ind_Affected')}</td>
+                                <td style="color: #666;"><strong>HH Affected:</strong></td>
+                                <td style="color: #333;">{r.get('HH_Affected')}</td>
+                            </tr>
+                            <tr>
+                                <td style="color: #666;"><strong>Shelters Destroyed:</strong></td>
+                                <td style="color: #333;">{r.get('Shelters_Destroyed')}</td>
+                                <td style="color: #666;"><strong>Shelters Damaged:</strong></td>
+                                <td style="color: #333;">{r.get('Shelters_Damaged')}</td>
+                            </tr>
+                            <tr>
+                                <td style="color: #666;"><strong>Sleeping Outside:</strong></td>
+                                <td style="color: #333;">{r.get('Sleeping_Outside')}</td>
+                                <td style="color: #666;"><strong>Needs:</strong></td>
+                                <td style="color: #333;">{r.get('Quantities')}</td>
+                            </tr>
+                            <tr>
+                                <td colspan="4" style="padding-top: 15px; border-top: 1px dashed #eee;">
+                                    <strong style="color: #666;">Details:</strong><br>
+                                    <span style="color: #333; line-height: 1.5; display: inline-block; margin-top: 5px;">{r.get('Details')}</span>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 15px; border-top: 1px solid #eee; background-color: #fafafa; border-radius: 0 0 8px 8px;" align="center">
+                        <a href="{r.get('URL')}" style="display: inline-block; padding: 10px 20px; background-color: #2b7a91; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px;">Review Case</a>
+                    </td>
+                </tr>
+            </table>
+            """
+
+    # Assemble the final email
+    html_template = f"""
+    <div style="max-width: 700px; margin: auto; border: 1px solid #e0e0e0; font-family: 'Segoe UI', Arial, sans-serif; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #f4f6f8;">
+        
+        <div style="background-color: #ffffff; padding: 25px; text-align: center; border-bottom: 3px solid #2b7a91;">
+            <img src="{LOGO_URL}" alt="SMC Logo" style="max-height: 70px; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;">
+            <h2 style="margin: 0; color: #333; font-size: 22px;">INCIDENT MANAGEMENT SYSTEM</h2>
+            <p style="margin: 5px 0 0 0; font-size: 14px; color: #666; font-weight: bold;">SITE MANAGEMENT CLUSTER</p>
         </div>
-        <div style="padding: 40px 30px;">
-            <h2 style="color: #2b7a91; margin-top: 0;">{status_msg}</h2>
-            {table_html}
-            <p style="margin-top: 30px;">This is an automated report generated at 06:00 AM Amman Time.</p>
+
+        <div style="padding: 30px;">
+            <h3 style="color: #d9534f; margin-top: 0; font-size: 18px; margin-bottom: 20px; border-bottom: 1px solid #ddd; padding-bottom: 10px;">{status_msg}</h3>
+            
+            {content_html}
+            
+            <p style="margin-top: 30px; font-size: 13px; color: #777; line-height: 1.5; text-align: center;">
+                This is an automated report generated at 06:00 AM Amman Time.<br>
+                <em>An Excel file containing the complete dataset for today's incidents is attached.</em>
+            </p>
         </div>
-        <div style="background-color: #333; color: #ccc; padding: 20px; text-align: center; font-size: 12px;">
-            © 2026 Site Management Cluster
+
+        <div style="background-color: #333; color: #ccc; padding: 15px; text-align: center; font-size: 12px;">
+            © 2026 Site Management Cluster | Automated via Google Cloud
         </div>
     </div>
     """
-    message.attach(MIMEText(html_content, 'html'))
+    
+    message.attach(MIMEText(html_template, 'html'))
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
     service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
