@@ -110,7 +110,7 @@ def run_workflow(request):
                         "Agency Name": item.get('Site Information/Site Type', 'N/A'),
                         "Reporter": item.get('Details of Alert-Name of Person Completing the Form [Most Recent]', 'N/A'),
                         "Contact": item.get("Details of Alert-Please provide the reporter's contact information in case we need to follow up. [Most Recent]", 'N/A'),
-                        "Incident": item.get('Event Information-What was the main incident? [Most Recent] ', 'N/A'),
+                        "Incident": item.get('Event Information-What was the main incident? [Most Recent]', 'N/A'),
                         "Details": item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A'),
                         "Ind_Affected": str(item.get('Impact of Incident-Individuals affected [Most Recent]', '0')),
                         "HH_Affected": str(item.get('Impact of Incident-Households affected [Most Recent]', '0')),
@@ -168,7 +168,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
     # --- BUILD BEAUTIFIED HTML EMAIL (CARD LAYOUT) ---
     if not summary_data:
         status_msg = "No incidents reported today."
-        content_html = "<p style='color: #666; font-size: 16px; padding: 20px; text-align: center;'>Systems are clear. No new submissions detected.</p>"
+        content_html = "<p style='color: #666; font-size: 16px; padding: 20px; text-align: center;'>All clear. No new submissions detected.</p>"
     else:
         status_msg = f"Action Required: {len(summary_data)} New Incidents"
         content_html = ""
