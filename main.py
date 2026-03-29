@@ -248,8 +248,8 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
         
         <div style="background-color: #ffffff; padding: 25px; text-align: center; border-bottom: 3px solid #2b7a91;">
             <img src="{LOGO_URL}" alt="SMC Logo" style="max-height: 70px; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;">
-            <h2 style="margin: 0; color: #333; font-size: 22px;">INCIDENT MANAGEMENT SYSTEM</h2>
-            <p style="margin: 5px 0 0 0; font-size: 14px; color: #666; font-weight: bold;">SITE MANAGEMENT CLUSTER</p>
+            <h2 style="margin: 0; color: #333; font-size: 22px;">INCIDENT ALERT SYSTEM</h2>
+            <p style="margin: 5px 0 0 0; font-size: 14px; color: #666; font-weight: bold;">SITE MANAGEMENT CLUSTER (oPT)</p>
         </div>
 
         <div style="padding: 30px;">
