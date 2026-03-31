@@ -249,7 +249,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
                                     <p style="margin: 4px 0 0 0; font-size: 13px; color: #666;">{r.get('Governorate')} - {r.get('Neighborhood')}</p>
                                 </td>
                                 <td align="right" valign="top">
-                                    <span style="display: inline-block; padding: 6px 10px; background-color: #ffeaea; color: #d9534f; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
+                                    <span style="display: inline-block; padding: 6px 10px; background-color: #1B657C; color: #EC6B4D; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
                                 </td>
                             </tr>
                         </table>
