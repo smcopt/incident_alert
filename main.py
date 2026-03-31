@@ -155,11 +155,15 @@ def run_workflow(request):
         return f"Error: {e}", 500
 
 def send_beautified_email(service, summary_data, full_data=None, headers=None):
+    # Calculate the dates first so we can use them in the subject line
+    current_date = datetime.now().strftime("%d-%m-%Y")
+    report_date = (datetime.now() - timedelta(days=1)).strftime("%d-%m-%Y")
+    
     message = MIMEMultipart()
     message['to'] = RECIPIENT_EMAIL
     message['from'] = SENDER_EMAIL
-    message['subject'] = "Daily Incident Summary - SM Cluster"
-
+    message['subject'] = f"Daily Incident Summary - SM Cluster ({report_date})"
+    
     current_date = datetime.now().strftime("%d-%m-%Y")
     # Calculate yesterday's date for the report header
     report_date = (datetime.now() - timedelta(days=1)).strftime("%d-%m-%Y")
@@ -174,7 +178,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
         part_full = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         part_full.set_payload(full_buffer.read())
         encoders.encode_base64(part_full)
-        part_full.add_header('Content-Disposition', f'attachment; filename="SMC Site Alert - {current_date}.xlsx"')
+        part_full.add_header('Content-Disposition', f'attachment; filename="Internal_SMC Site Alert - {current_date}.xlsx"')
         message.attach(part_full)
 
     # --- 2. ATTACH TRUNCATED & FORMATTED EXTERNAL EXCEL ---
@@ -216,7 +220,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
         part_ext = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         part_ext.set_payload(ext_buffer.read())
         encoders.encode_base64(part_ext)
-        part_ext.add_header('Content-Disposition', f'attachment; filename="SMC Site Alert - {current_date}_ExternalSharing.xlsx"')
+        part_ext.add_header('Content-Disposition', f'attachment; filename="ExternalSharing_SMC Site Alert - {current_date}.xlsx"')
         message.attach(part_ext)
 
     # --- 3. BUILD BEAUTIFIED HTML EMAIL (CARD LAYOUT) ---
