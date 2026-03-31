@@ -14,6 +14,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from googleapiclient.discovery import build
+from openpyxl.styles import Font
 
 # --- CONFIGURATION ---
 SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
@@ -100,7 +101,16 @@ def run_workflow(request):
                     row_data = [str(item.get(key, '')) for key in all_keys]
                     new_records_for_sheet.append(row_data)
 
-                    # Create a structured dictionary of the 17 fields for the Email Cards
+                    # --- Handle "Other" Logic ---
+                    raw_main_incident = str(item.get('Event Information-What was the main incident? [Most Recent] ', '')).strip()
+                    raw_other_incident = str(item.get('Event Information-If other, please specify  [Most Recent]', '')).strip()
+                    
+                    if not raw_main_incident or raw_main_incident.lower() == 'other':
+                        final_main_incident = raw_other_incident if raw_other_incident else 'N/A'
+                    else:
+                        final_main_incident = raw_main_incident
+
+                    # Create a structured dictionary of the renamed fields for Email & External Excel
                     email_incident = {
                         "Site ID": item.get('Site ID', 'N/A'),
                         "Site Name": item.get('Site Name', 'N/A'),
@@ -108,16 +118,16 @@ def run_workflow(request):
                         "Governorate": item.get('Site Information/First Level Region Name', 'N/A'),
                         "Neighborhood": item.get('Site Information/Second Level Region Name', 'N/A'),
                         "Agency Name": item.get('Site Information/Site Type', 'N/A'),
-                        "Reporter": item.get('Details of Alert-Name of Person Completing the Form [Most Recent]', 'N/A'),
-                        "Contact": item.get("Details of Alert-Please provide the reporter's contact information in case we need to follow up. [Most Recent]", 'N/A'),
-                        "Incident": item.get('Event Information-What was the main incident? [Most Recent]', 'N/A'),
-                        "Details": item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A'),
-                        "Ind_Affected": str(item.get('Impact of Incident-Individuals affected [Most Recent]', '0')),
-                        "HH_Affected": str(item.get('Impact of Incident-Households affected [Most Recent]', '0')),
-                        "Shelters_Destroyed": str(item.get('Impact of Incident-Number of Shelters Completely Damaged [Most Recent]', '0')),
-                        "Shelters_Damaged": str(item.get('Impact of Incident-Number of Shelters Partially Damaged: [Most Recent]', '0')),
-                        "Sleeping_Outside": str(item.get('Impact of Incident-Number of Households sleeping outside of shelter: [Most Recent]', '0')),
-                        "Quantities": item.get('Top Needs-Quantities Required for Support [Most Recent]', 'N/A'),
+                        "Name of Reporter": item.get('Details of Alert-Name of Person Completing the Form [Most Recent]', 'N/A'),
+                        "Reporter Contact Information": item.get("Details of Alert-Please provide the reporter's contact information in case we need to follow up. [Most Recent]", 'N/A'),
+                        "Main Incident": final_main_incident,
+                        "Details About the Incident": item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A'),
+                        "Individuals Affected": str(item.get('Impact of Incident-Individuals affected [Most Recent]', '0')),
+                        "Households Affected": str(item.get('Impact of Incident-Households affected [Most Recent]', '0')),
+                        "Shelters Completely Damaged": str(item.get('Impact of Incident-Number of Shelters Completely Damaged [Most Recent]', '0')),
+                        "Shelters Partially Damaged": str(item.get('Impact of Incident-Number of Shelters Partially Damaged: [Most Recent]', '0')),
+                        "HHs Sleeping Outside Shelter": str(item.get('Impact of Incident-Number of Households sleeping outside of shelter: [Most Recent]', '0')),
+                        "Quantities Required for Support": item.get('Top Needs-Quantities Required for Support [Most Recent]', 'N/A'),
                         "URL": item.get('Url', '#')
                     }
                     new_records_for_email.append(email_incident)
@@ -149,23 +159,64 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
     message['from'] = SENDER_EMAIL
     message['subject'] = "Daily Incident Summary - SM Cluster"
 
-    # --- ATTACH EXCEL IF WE HAVE DATA ---
+    current_date = datetime.now().strftime("%d-%m-%Y")
+
+    # --- 1. ATTACH FULL INTERNAL EXCEL ---
     if full_data and headers:
-        df = pd.DataFrame(full_data, columns=headers)
-        excel_buffer = io.BytesIO()
-        df.to_excel(excel_buffer, index=False, engine='openpyxl')
-        excel_buffer.seek(0)
-
-        current_date = datetime.now().strftime("%d-%m-%Y")
-        filename = f"SMC Site Alert - {current_date}.xlsx"
+        df_full = pd.DataFrame(full_data, columns=headers)
+        full_buffer = io.BytesIO()
+        df_full.to_excel(full_buffer, index=False, engine='openpyxl')
+        full_buffer.seek(0)
         
-        part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        part.set_payload(excel_buffer.read())
-        encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
-        message.attach(part)
+        part_full = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        part_full.set_payload(full_buffer.read())
+        encoders.encode_base64(part_full)
+        part_full.add_header('Content-Disposition', f'attachment; filename="SMC Site Alert - {current_date}.xlsx"')
+        message.attach(part_full)
 
-    # --- BUILD BEAUTIFIED HTML EMAIL (CARD LAYOUT) ---
+    # --- 2. ATTACH TRUNCATED & FORMATTED EXTERNAL EXCEL ---
+    if summary_data:
+        # Define the exact columns for the external sheet (excludes 'URL')
+        ext_cols = [
+            "Site ID", "Site Name", "Site Name (Arabic)", "Governorate", "Neighborhood", 
+            "Agency Name", "Name of Reporter", "Reporter Contact Information", 
+            "Main Incident", "Details About the Incident", "Individuals Affected", 
+            "Households Affected", "Shelters Completely Damaged", "Shelters Partially Damaged", 
+            "HHs Sleeping Outside Shelter", "Quantities Required for Support"
+        ]
+        
+        df_ext = pd.DataFrame(summary_data, columns=ext_cols)
+        ext_buffer = io.BytesIO()
+        
+        # Apply formatting to the external Excel file
+        with pd.ExcelWriter(ext_buffer, engine='openpyxl') as writer:
+            df_ext.to_excel(writer, index=False, sheet_name='Site Alerts')
+            worksheet = writer.sheets['Site Alerts']
+            
+            # Make headers bold and auto-adjust column width (max 50 wide)
+            for cell in worksheet[1]:
+                cell.font = Font(bold=True)
+                
+            for col in worksheet.columns:
+                max_length = 0
+                column_letter = col[0].column_letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(cell.value)
+                    except:
+                        pass
+                worksheet.column_dimensions[column_letter].width = min((max_length + 2), 50)
+
+        ext_buffer.seek(0)
+        
+        part_ext = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        part_ext.set_payload(ext_buffer.read())
+        encoders.encode_base64(part_ext)
+        part_ext.add_header('Content-Disposition', f'attachment; filename="SMC Site Alert - {current_date}_ExternalSharing.xlsx"')
+        message.attach(part_ext)
+
+    # --- 3. BUILD BEAUTIFIED HTML EMAIL (CARD LAYOUT) ---
     if not summary_data:
         status_msg = "No incidents reported today."
         content_html = "<p style='color: #666; font-size: 16px; padding: 20px; text-align: center;'>All clear. No new submissions detected.</p>"
@@ -186,7 +237,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
                                     <p style="margin: 4px 0 0 0; font-size: 13px; color: #666;">{r.get('Governorate')} - {r.get('Neighborhood')}</p>
                                 </td>
                                 <td align="right" valign="top">
-                                    <span style="display: inline-block; padding: 6px 10px; background-color: #ffeaea; color: #d9534f; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Incident')}</span>
+                                    <span style="display: inline-block; padding: 6px 10px; background-color: #ffeaea; color: #d9534f; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
                                 </td>
                             </tr>
                         </table>
@@ -203,32 +254,32 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
                             </tr>
                             <tr>
                                 <td style="color: #666;"><strong>Reporter:</strong></td>
-                                <td style="color: #333;">{r.get('Reporter')}</td>
+                                <td style="color: #333;">{r.get('Name of Reporter')}</td>
                                 <td style="color: #666;"><strong>Contact:</strong></td>
-                                <td style="color: #333;">{r.get('Contact')}</td>
+                                <td style="color: #333;">{r.get('Reporter Contact Information')}</td>
                             </tr>
                             <tr>
                                 <td style="color: #666;"><strong>Ind. Affected:</strong></td>
-                                <td style="color: #333;">{r.get('Ind_Affected')}</td>
+                                <td style="color: #333;">{r.get('Individuals Affected')}</td>
                                 <td style="color: #666;"><strong>HH Affected:</strong></td>
-                                <td style="color: #333;">{r.get('HH_Affected')}</td>
+                                <td style="color: #333;">{r.get('Households Affected')}</td>
                             </tr>
                             <tr>
                                 <td style="color: #666;"><strong>Shelters Destroyed:</strong></td>
-                                <td style="color: #333;">{r.get('Shelters_Destroyed')}</td>
+                                <td style="color: #333;">{r.get('Shelters Completely Damaged')}</td>
                                 <td style="color: #666;"><strong>Shelters Damaged:</strong></td>
-                                <td style="color: #333;">{r.get('Shelters_Damaged')}</td>
+                                <td style="color: #333;">{r.get('Shelters Partially Damaged')}</td>
                             </tr>
                             <tr>
                                 <td style="color: #666;"><strong>Sleeping Outside:</strong></td>
-                                <td style="color: #333;">{r.get('Sleeping_Outside')}</td>
+                                <td style="color: #333;">{r.get('HHs Sleeping Outside Shelter')}</td>
                                 <td style="color: #666;"><strong>Needs:</strong></td>
-                                <td style="color: #333;">{r.get('Quantities')}</td>
+                                <td style="color: #333;">{r.get('Quantities Required for Support')}</td>
                             </tr>
                             <tr>
                                 <td colspan="4" style="padding-top: 15px; border-top: 1px dashed #eee;">
                                     <strong style="color: #666;">Details:</strong><br>
-                                    <span style="color: #333; line-height: 1.5; display: inline-block; margin-top: 5px;">{r.get('Details')}</span>
+                                    <span style="color: #333; line-height: 1.5; display: inline-block; margin-top: 5px;">{r.get('Details About the Incident')}</span>
                                 </td>
                             </tr>
                         </table>
@@ -259,7 +310,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
             
             <p style="margin-top: 30px; font-size: 13px; color: #777; line-height: 1.5; text-align: center;">
                 This is an automated report generated at 06:00 AM Amman Time.<br>
-                <em>An Excel file containing the complete dataset for today's incidents is attached.</em>
+                <em>Two Excel files are attached: Internal Full Data and External Truncated Data.</em>
             </p>
         </div>
 
