@@ -271,9 +271,9 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
                                 <td style="color: #333;">{r.get('Shelters Partially Damaged')}</td>
                             </tr>
                             <tr>
-                                <td style="color: #666;"><strong>Sleeping Outside:</strong></td>
+                                <td style="color: #666;"><strong>HHs Sleeping Outside:</strong></td>
                                 <td style="color: #333;">{r.get('HHs Sleeping Outside Shelter')}</td>
-                                <td style="color: #666;"><strong>Needs:</strong></td>
+                                <td style="color: #666;"><strong>Quantities Required for Support:</strong></td>
                                 <td style="color: #333;">{r.get('Quantities Required for Support')}</td>
                             </tr>
                             <tr>
