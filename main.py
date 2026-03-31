@@ -102,7 +102,7 @@ def run_workflow(request):
                     new_records_for_sheet.append(row_data)
 
                     # --- Handle "Other" Logic ---
-                    raw_main_incident = str(item.get('Event Information-What was the main incident? [Most Recent] ', '')).strip()
+                    raw_main_incident = str(item.get('Event Information-What was the main incident? [Most Recent]', '')).strip()
                     raw_other_incident = str(item.get('Event Information-If other, please specify  [Most Recent]', '')).strip()
                     
                     if not raw_main_incident or raw_main_incident.lower() == 'other':
