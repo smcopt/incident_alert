@@ -15,6 +15,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from googleapiclient.discovery import build
 from openpyxl.styles import Font
+from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
 SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
@@ -160,6 +161,8 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
     message['subject'] = "Daily Incident Summary - SM Cluster"
 
     current_date = datetime.now().strftime("%d-%m-%Y")
+    # Calculate yesterday's date for the report header
+    report_date = (datetime.now() - timedelta(days=1)).strftime("%d-%m-%Y")
 
     # --- 1. ATTACH FULL INTERNAL EXCEL ---
     if full_data and headers:
@@ -218,7 +221,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
 
     # --- 3. BUILD BEAUTIFIED HTML EMAIL (CARD LAYOUT) ---
     if not summary_data:
-        status_msg = "No incidents reported today."
+        status_msg = "No incidents reported yesterday."
         content_html = "<p style='color: #666; font-size: 16px; padding: 20px; text-align: center;'>All clear. No new submissions detected.</p>"
     else:
         status_msg = f"Action Required: {len(summary_data)} New Incidents"
@@ -301,6 +304,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
             <img src="{LOGO_URL}" alt="SMC Logo" style="max-height: 70px; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;">
             <h2 style="margin: 0; color: #333; font-size: 22px;">INCIDENT ALERT SYSTEM</h2>
             <p style="margin: 5px 0 0 0; font-size: 14px; color: #666; font-weight: bold;">SITE MANAGEMENT CLUSTER (oPT)</p>
+            <p style="margin: 5px 0 0 0; font-size: 13px; color: #888;">Report Date: {report_date}</p>
         </div>
 
         <div style="padding: 30px;">
@@ -309,7 +313,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
             {content_html}
             
             <p style="margin-top: 30px; font-size: 13px; color: #777; line-height: 1.5; text-align: center;">
-                This is an automated report generated at 06:00 AM Amman Time.<br>
+                This is an automated report generated at 06:00 AM Amman Time. It summarizes incidents from the previous day. <br>
                 <em>Two Excel files are attached: Internal Full Data and External Truncated Data.</em>
             </p>
         </div>
