@@ -231,7 +231,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
     # --- 3. BUILD BEAUTIFIED HTML EMAIL (CARD LAYOUT) ---
     if not summary_data:
         status_msg = "No incidents reported yesterday."
-        content_html = "<p style='color: #F5F3E8; font-size: 16px; padding: 20px; text-align: center;'>All clear. No new submissions detected.</p>"
+        content_html = "<p style='color: #666; font-size: 16px; padding: 20px; text-align: center;'>All clear. No new submissions detected.</p>"
     else:
         status_msg = f"Action Required: {len(summary_data)} New Incidents"
         content_html = ""
@@ -239,7 +239,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
         # Build an HTML card for each incident
         for r in summary_data:
             content_html += f"""
-            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; font-family: Arial, sans-serif; background-color: #F5F3E8;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; font-family: Arial, sans-serif; background-color: #ffffff;">
                 <tr>
                     <td style="padding: 15px; border-bottom: 1px solid #ddd; background-color: #f9f9f9; border-radius: 8px 8px 0 0;">
                         <table width="100%" cellpadding="0" cellspacing="0">
@@ -249,7 +249,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
                                     <p style="margin: 4px 0 0 0; font-size: 13px; color: #666;">{r.get('Governorate')} - {r.get('Neighborhood')}</p>
                                 </td>
                                 <td align="right" valign="top">
-                                    <span style="display: inline-block; padding: 6px 10px; background-color: #1B657C; color: #EC6B4D; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
+                                    <span style="display: inline-block; padding: 6px 10px; background-color: #ffeaea; color: #d9534f; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
                                 </td>
                             </tr>
                         </table>
@@ -307,7 +307,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
 
     # Assemble the final email
     html_template = f"""
-    <div style="max-width: 700px; margin: auto; border: 1px solid #e0e0e0; font-family: 'Segoe UI', Arial, sans-serif; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #F5F3E8;">
+    <div style="max-width: 700px; margin: auto; border: 1px solid #e0e0e0; font-family: 'Segoe UI', Arial, sans-serif; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #f4f6f8;">
         
         <div style="background-color: #ffffff; padding: 25px; text-align: center; border-bottom: 3px solid #2b7a91;">
             <img src="{LOGO_URL}" alt="SMC Logo" style="max-height: 70px; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;">
