@@ -15,7 +15,8 @@ from email.mime.base import MIMEBase
 from email import encoders
 from googleapiclient.discovery import build
 from openpyxl.styles import Font
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
 
 # --- CONFIGURATION ---
 SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
@@ -155,18 +156,22 @@ def run_workflow(request):
         return f"Error: {e}", 500
 
 def send_beautified_email(service, summary_data, full_data=None, headers=None):
-    # Calculate the dates first so we can use them in the subject line
-    current_date = datetime.now().strftime("%d-%m-%Y")
-    report_date = (datetime.now() - timedelta(days=1)).strftime("%d-%m-%Y")
+    # 1. Force the server to use Amman Timezone (UTC+3)
+    amman_tz = timezone(timedelta(hours=3))
+    
+    # 2. Get the exact current time in Amman
+    amman_time = datetime.now(amman_tz)
+
+    # 3. Calculate today and yesterday based securely on Amman time
+    current_date = amman_time.strftime("%d-%m-%Y")
+    report_date = (amman_time - timedelta(days=1)).strftime("%d-%m-%Y")
     
     message = MIMEMultipart()
     message['to'] = RECIPIENT_EMAIL
     message['from'] = SENDER_EMAIL
     message['subject'] = f"Daily Incident Summary - SM Cluster ({report_date})"
     
-    current_date = datetime.now().strftime("%d-%m-%Y")
-    # Calculate yesterday's date for the report header
-    report_date = (datetime.now() - timedelta(days=1)).strftime("%d-%m-%Y")
+
 
     # --- 1. ATTACH FULL INTERNAL EXCEL ---
     if full_data and headers:
