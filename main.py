@@ -122,12 +122,12 @@ def run_workflow(request):
                         "Reporter Contact Information": item.get('Details of Alert-Please provide the reporter's contact information in case we need to follow up.  [Most Recent]', 'N/A'),
                         "Main Incident": final_main_incident,
                         "Details About the Incident": item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A'),
-                        "Individuals Affected": str(item.get('Impact of Incident-Individuals affected [Most Recent]', '0')),
-                        "Households Affected": str(item.get('Impact of Incident-Households affected [Most Recent]', '0')),
-                        "Shelters Completely Damaged": str(item.get('Impact of Incident-Number of Shelters Completely Damaged [Most Recent]', '0')),
-                        "Shelters Partially Damaged": str(item.get('Impact of Incident-Number of Shelters Partially Damaged: [Most Recent]', '0')),
-                        "HHs Sleeping Outside Shelter": str(item.get('Impact of Incident-Number of Households sleeping outside of shelter: [Most Recent]', '0')),
-                        "Quantities Required for Support": item.get('Top Needs-Quantities Required for Support [Most Recent]', 'N/A'),
+                        "Individuals Affected": str(item.get('Impact of Incident-Individuals affected  [Most Recent]', '0')),
+                        "Households Affected": str(item.get('Impact of Incident-Households affected  [Most Recent]', '0')),
+                        "Shelters Completely Damaged": str(item.get('Impact of Incident-Number of Shelters Completely Damaged  [Most Recent]', '0')),
+                        "Shelters Partially Damaged": str(item.get('Impact of Incident-Number of Shelters Partially Damaged:  [Most Recent]', '0')),
+                        "HHs Sleeping Outside Shelter": str(item.get('Impact of Incident-Number of Households sleeping outside of shelter:  [Most Recent]', '0')),
+                        "Quantities Required for Support": item.get('Top Needs-Quantities Required for Support  [Most Recent]', 'N/A'),
                         "URL": item.get('Url', '#')
                     }
                     new_records_for_email.append(email_incident)
