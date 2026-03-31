@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 # --- CONFIGURATION ---
 SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
 SENDER_EMAIL = 'info@smcopt.org'
-RECIPIENT_EMAIL = 'sujanpaudel@iom.int'
+RECIPIENT_EMAIL = 'coordination@smcopt.org'
 API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=2137&key=7kq1bSino0AcI86hIFbmM6mmTU425121134211' 
 SERVICE_ACCOUNT_EMAIL = 'incident-alert@incidentalert-490412.iam.gserviceaccount.com'
 
@@ -309,7 +309,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
     html_template = f"""
     <div style="max-width: 700px; margin: auto; border: 1px solid #D4A373; font-family: 'Segoe UI', Arial, sans-serif; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #F5F3E8;">
         
-        <div style="background-color: #6FC5BC; padding: 25px; text-align: center; border-bottom: 4px solid #1B657C;">
+        <div style="background-color: #ffffff; padding: 25px; text-align: center; border-bottom: 4px solid #1B657C;">
             <img src="{LOGO_URL}" alt="SMC Logo" style="max-height: 70px; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;">
             <h2 style="margin: 0; color: #3D405B; font-size: 22px;">INCIDENT ALERT SYSTEM</h2>
             <p style="margin: 5px 0 0 0; font-size: 14px; color: #1B657C; font-weight: bold;">SITE MANAGEMENT CLUSTER (oPT)</p>
