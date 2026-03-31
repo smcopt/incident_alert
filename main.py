@@ -119,7 +119,7 @@ def run_workflow(request):
                         "Neighborhood": item.get('Site Information/Second Level Region Name', 'N/A'),
                         "Agency Name": item.get('Site Information/Site Type', 'N/A'),
                         "Name of Reporter": item.get('Details of Alert-Name of Person Completing the Form  [Most Recent]', 'N/A'),
-                        "Reporter Contact Information": item.get('Details of Alert-Please provide the reporter's contact information in case we need to follow up.  [Most Recent]', 'N/A'),
+                        "Reporter Contact Information": item.get("Details of Alert-Please provide the reporter's contact information in case we need to follow up.  [Most Recent]", 'N/A'),
                         "Main Incident": final_main_incident,
                         "Details About the Incident": item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A'),
                         "Individuals Affected": str(item.get('Impact of Incident-Individuals affected  [Most Recent]', '0')),
