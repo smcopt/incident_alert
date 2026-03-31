@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 # --- CONFIGURATION ---
 SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
 SENDER_EMAIL = 'info@smcopt.org'
-RECIPIENT_EMAIL = 'coordination@smcopt.org'
+RECIPIENT_EMAIL = 'sujanpaudel@iom.int'
 API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=2137&key=7kq1bSino0AcI86hIFbmM6mmTU425121134211' 
 SERVICE_ACCOUNT_EMAIL = 'incident-alert@incidentalert-490412.iam.gserviceaccount.com'
 
@@ -231,7 +231,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
     # --- 3. BUILD BEAUTIFIED HTML EMAIL (CARD LAYOUT) ---
     if not summary_data:
         status_msg = "No incidents reported yesterday."
-        content_html = "<p style='color: #666; font-size: 16px; padding: 20px; text-align: center;'>All clear. No new submissions detected.</p>"
+        content_html = "<p style='color: #3D405B; font-size: 16px; padding: 20px; text-align: center;'>All clear. No new submissions detected.</p>"
     else:
         status_msg = f"Action Required: {len(summary_data)} New Incidents"
         content_html = ""
@@ -239,17 +239,17 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
         # Build an HTML card for each incident
         for r in summary_data:
             content_html += f"""
-            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; font-family: Arial, sans-serif; background-color: #ffffff;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px; border: 1px solid #D4A373; border-radius: 8px; font-family: Arial, sans-serif; background-color: #ffffff;">
                 <tr>
-                    <td style="padding: 15px; border-bottom: 1px solid #ddd; background-color: #f9f9f9; border-radius: 8px 8px 0 0;">
+                    <td style="padding: 15px; border-bottom: 1px solid #D4A373; background-color: #F5F3E8; border-radius: 8px 8px 0 0;">
                         <table width="100%" cellpadding="0" cellspacing="0">
                             <tr>
                                 <td align="left">
-                                    <h3 style="margin: 0; color: #2b7a91; font-size: 18px;">{r.get('Site ID')} - {r.get('Site Name')}</h3>
-                                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #666;">{r.get('Governorate')} - {r.get('Neighborhood')}</p>
+                                    <h3 style="margin: 0; color: #1B657C; font-size: 18px;">{r.get('Site ID')} - {r.get('Site Name')}</h3>
+                                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #3D405B;">{r.get('Governorate')} - {r.get('Neighborhood')}</p>
                                 </td>
                                 <td align="right" valign="top">
-                                    <span style="display: inline-block; padding: 6px 10px; background-color: #ffeaea; color: #d9534f; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
+                                    <span style="display: inline-block; padding: 6px 10px; background-color: #EC6B4D; color: #F5F3E8; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
                                 </td>
                             </tr>
                         </table>
@@ -259,47 +259,47 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
                     <td style="padding: 15px;">
                         <table width="100%" cellpadding="6" cellspacing="0" style="font-size: 13px;">
                             <tr>
-                                <td width="25%" style="color: #666;"><strong>Site Name (Ar):</strong></td>
-                                <td width="25%" style="color: #333;">{r.get('Site Name (Arabic)')}</td>
-                                <td width="25%" style="color: #666;"><strong>Agency:</strong></td>
-                                <td width="25%" style="color: #333;">{r.get('Agency Name')}</td>
+                                <td width="25%" style="color: #3D405B;"><strong>Site Name (Ar):</strong></td>
+                                <td width="25%" style="color: #3D405B;">{r.get('Site Name (Arabic)')}</td>
+                                <td width="25%" style="color: #3D405B;"><strong>Agency:</strong></td>
+                                <td width="25%" style="color: #3D405B;">{r.get('Agency Name')}</td>
                             </tr>
                             <tr>
-                                <td style="color: #666;"><strong>Reporter:</strong></td>
-                                <td style="color: #333;">{r.get('Name of Reporter')}</td>
-                                <td style="color: #666;"><strong>Contact:</strong></td>
-                                <td style="color: #333;">{r.get('Reporter Contact Information')}</td>
+                                <td style="color: #3D405B;"><strong>Reporter:</strong></td>
+                                <td style="color: #3D405B;">{r.get('Name of Reporter')}</td>
+                                <td style="color: #3D405B;"><strong>Contact:</strong></td>
+                                <td style="color: #3D405B;">{r.get('Reporter Contact Information')}</td>
                             </tr>
                             <tr>
-                                <td style="color: #666;"><strong>Ind. Affected:</strong></td>
-                                <td style="color: #333;">{r.get('Individuals Affected')}</td>
-                                <td style="color: #666;"><strong>HH Affected:</strong></td>
-                                <td style="color: #333;">{r.get('Households Affected')}</td>
+                                <td style="color: #3D405B;"><strong>Ind. Affected:</strong></td>
+                                <td style="color: #3D405B;">{r.get('Individuals Affected')}</td>
+                                <td style="color: #3D405B;"><strong>HH Affected:</strong></td>
+                                <td style="color: #3D405B;">{r.get('Households Affected')}</td>
                             </tr>
                             <tr>
-                                <td style="color: #666;"><strong>Shelters Destroyed:</strong></td>
-                                <td style="color: #333;">{r.get('Shelters Completely Damaged')}</td>
-                                <td style="color: #666;"><strong>Shelters Damaged:</strong></td>
-                                <td style="color: #333;">{r.get('Shelters Partially Damaged')}</td>
+                                <td style="color: #3D405B;"><strong>Shelters Destroyed:</strong></td>
+                                <td style="color: #3D405B;">{r.get('Shelters Completely Damaged')}</td>
+                                <td style="color: #3D405B;"><strong>Shelters Damaged:</strong></td>
+                                <td style="color: #3D405B;">{r.get('Shelters Partially Damaged')}</td>
                             </tr>
                             <tr>
-                                <td style="color: #666;"><strong>HHs Sleeping Outside:</strong></td>
-                                <td style="color: #333;">{r.get('HHs Sleeping Outside Shelter')}</td>
-                                <td style="color: #666;"><strong>Quantities Required for Support:</strong></td>
-                                <td style="color: #333;">{r.get('Quantities Required for Support')}</td>
+                                <td style="color: #3D405B;"><strong>HHs Sleeping Outside:</strong></td>
+                                <td style="color: #3D405B;">{r.get('HHs Sleeping Outside Shelter')}</td>
+                                <td style="color: #3D405B;"><strong>Quantities Required for Support:</strong></td>
+                                <td style="color: #3D405B;">{r.get('Quantities Required for Support')}</td>
                             </tr>
                             <tr>
-                                <td colspan="4" style="padding-top: 15px; border-top: 1px dashed #eee;">
-                                    <strong style="color: #666;">Details:</strong><br>
-                                    <span style="color: #333; line-height: 1.5; display: inline-block; margin-top: 5px;">{r.get('Details About the Incident')}</span>
+                                <td colspan="4" style="padding-top: 15px; border-top: 1px dashed #D4A373;">
+                                    <strong style="color: #3D405B;">Details:</strong><br>
+                                    <span style="color: #3D405B; line-height: 1.5; display: inline-block; margin-top: 5px;">{r.get('Details About the Incident')}</span>
                                 </td>
                             </tr>
                         </table>
                     </td>
                 </tr>
                 <tr>
-                    <td style="padding: 15px; border-top: 1px solid #eee; background-color: #fafafa; border-radius: 0 0 8px 8px;" align="center">
-                        <a href="{r.get('URL')}" style="display: inline-block; padding: 10px 20px; background-color: #2b7a91; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px;">Review Case</a>
+                    <td style="padding: 15px; border-top: 1px solid #D4A373; background-color: #F5F3E8; border-radius: 0 0 8px 8px;" align="center">
+                        <a href="{r.get('URL')}" style="display: inline-block; padding: 10px 20px; background-color: #1B657C; color: #F5F3E8; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px;">Review Case</a>
                     </td>
                 </tr>
             </table>
@@ -307,27 +307,27 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
 
     # Assemble the final email
     html_template = f"""
-    <div style="max-width: 700px; margin: auto; border: 1px solid #e0e0e0; font-family: 'Segoe UI', Arial, sans-serif; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #f4f6f8;">
+    <div style="max-width: 700px; margin: auto; border: 1px solid #D4A373; font-family: 'Segoe UI', Arial, sans-serif; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #F5F3E8;">
         
-        <div style="background-color: #ffffff; padding: 25px; text-align: center; border-bottom: 3px solid #2b7a91;">
+        <div style="background-color: #ffffff; padding: 25px; text-align: center; border-bottom: 4px solid #1B657C;">
             <img src="{LOGO_URL}" alt="SMC Logo" style="max-height: 70px; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;">
-            <h2 style="margin: 0; color: #333; font-size: 22px;">INCIDENT ALERT SYSTEM</h2>
-            <p style="margin: 5px 0 0 0; font-size: 14px; color: #666; font-weight: bold;">SITE MANAGEMENT CLUSTER (oPT)</p>
-            <p style="margin: 5px 0 0 0; font-size: 13px; color: #888;">Report Date: {report_date}</p>
+            <h2 style="margin: 0; color: #3D405B; font-size: 22px;">INCIDENT ALERT SYSTEM</h2>
+            <p style="margin: 5px 0 0 0; font-size: 14px; color: #1B657C; font-weight: bold;">SITE MANAGEMENT CLUSTER (oPT)</p>
+            <p style="margin: 5px 0 0 0; font-size: 13px; color: #3D405B;">Report Date: {report_date}</p>
         </div>
 
         <div style="padding: 30px;">
-            <h3 style="color: #d9534f; margin-top: 0; font-size: 18px; margin-bottom: 20px; border-bottom: 1px solid #ddd; padding-bottom: 10px;">{status_msg}</h3>
+            <h3 style="color: #EC6B4D; margin-top: 0; font-size: 18px; margin-bottom: 20px; border-bottom: 1px solid #D4A373; padding-bottom: 10px;">{status_msg}</h3>
             
             {content_html}
             
-            <p style="margin-top: 30px; font-size: 13px; color: #777; line-height: 1.5; text-align: center;">
+            <p style="margin-top: 30px; font-size: 13px; color: #3D405B; line-height: 1.5; text-align: center;">
                 This is an automated report generated at 06:00 AM Amman Time. It summarizes incidents from the previous day. <br>
                 <em>Two Excel files are attached: Internal Full Data and External Truncated Data.</em>
             </p>
         </div>
 
-        <div style="background-color: #333; color: #ccc; padding: 15px; text-align: center; font-size: 12px;">
+        <div style="background-color: #3D405B; color: #F5F3E8; padding: 15px; text-align: center; font-size: 12px;">
             © 2026 Site Management Cluster | Automated via Google Cloud
         </div>
     </div>
