@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 # --- CONFIGURATION ---
 SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
 SENDER_EMAIL = 'info@smcopt.org'
-RECIPIENT_EMAIL = 'coordination@smcopt.org'
+RECIPIENT_EMAIL = 'sujanpaudel@iom.int'
 API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=2137&key=7kq1bSino0AcI86hIFbmM6mmTU425121134211' 
 SERVICE_ACCOUNT_EMAIL = 'incident-alert@incidentalert-490412.iam.gserviceaccount.com'
 
@@ -164,7 +164,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
 
     # 3. Calculate today and yesterday based securely on Amman time
     current_date = amman_time.strftime("%d-%m-%Y")
-    report_date = (amman_time - timedelta(days=1)).strftime("%d-%m-%Y")
+    report_date = current_date
     
     message = MIMEMultipart()
     message['to'] = RECIPIENT_EMAIL
@@ -322,7 +322,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
             {content_html}
             
             <p style="margin-top: 30px; font-size: 13px; color: #3D405B; line-height: 1.5; text-align: center;">
-                This is an automated report generated at 06:00 AM Amman Time. It summarizes incidents from the previous day. <br>
+                This is an automated report generated at 06:15 PM Amman Time. It summarizes incidents reported today({report_date}). <br>
                 <em>Two Excel files are attached: Internal Full Data and External Truncated Data.</em>
             </p>
         </div>
