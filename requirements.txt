@@ -1,6 +1,9 @@
+functions-framework==3.*
 google-api-python-client
 google-auth
 google-auth-httplib2
 requests
 pandas
 openpyxl
+matplotlib
+numpy
