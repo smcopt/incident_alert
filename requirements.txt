@@ -1,9 +1,7 @@
-functions-framework==3.*
-google-api-python-client
-google-auth
-google-auth-httplib2
-requests
-pandas
-openpyxl
-matplotlib
-numpy
+functions-framework==3.3.0
+pandas==2.1.4
+openpyxl==3.1.2
+matplotlib==3.8.2
+requests==2.31.0
+google-auth==2.26.2
+google-api-python-client==2.113.0
