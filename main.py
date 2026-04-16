@@ -98,6 +98,11 @@ def run_workflow(request):
             for item in api_data:
                 case_id = str(item.get('Case Id', ''))
                 
+                # Exclude incidents from sites that are no longer active
+                site_status = str(item.get('Site Information/Site Status', '')).strip().lower()
+                if site_status in ['inactive', 'not found']:
+                    continue
+                
                 if case_id and case_id not in existing_ids:
                     # Append ALL fields for Sheet/Excel
                     row_data = [str(item.get(key, '')) for key in all_keys]
@@ -117,8 +122,9 @@ def run_workflow(request):
                         "Site ID": item.get('Site ID', 'N/A'),
                         "Site Name": item.get('Site Name', 'N/A'),
                         "Site Name (Arabic)": item.get('Site Information/Site Name (Arabic)', 'N/A'),
-                        "Governorate": item.get('Site Information/First Level Region Name', 'N/A'),
-                        "Neighborhood": item.get('Site Information/Second Level Region Name', 'N/A'),
+                        # UPDATED: 'Site Information' changed to 'Region Information'
+                        "Governorate": item.get('Region Information/First Level Region Name', 'N/A'),
+                        "Neighborhood": item.get('Region Information/Second Level Region Name', 'N/A'),
                         "Agency Name": item.get('Site Information/Site Type', 'N/A'),
                         "Name of Reporter": item.get('Details of Alert-Name of Person Completing the Form  [Most Recent]', 'N/A'),
                         "Reporter Contact Information": item.get("Details of Alert-Please provide the reporter's contact information in case we need to follow up.  [Most Recent]", 'N/A'),
