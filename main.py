@@ -236,8 +236,8 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
 
     # --- 3. BUILD BEAUTIFIED HTML EMAIL (CARD LAYOUT) ---
     if not summary_data:
-        status_msg = "No incidents reported yesterday."
-        content_html = "<p style='color: #3D405B; font-size: 16px; padding: 20px; text-align: center;'>All clear. No new submissions detected.</p>"
+        status_msg = "No new incidents reported in the past 24 hours."
+        content_html = "<p style='color: #3D405B; font-size: 16px; padding: 20px; text-align: center;'>All clear. No new submissions received since the last update.</p>"
     else:
         status_msg = f"Action Required: {len(summary_data)} New Incidents"
         content_html = ""
@@ -319,7 +319,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
             <img src="{LOGO_URL}" alt="SMC Logo" style="max-height: 70px; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;">
             <h2 style="margin: 0; color: #3D405B; font-size: 22px;">INCIDENT ALERT SYSTEM</h2>
             <p style="margin: 5px 0 0 0; font-size: 14px; color: #1B657C; font-weight: bold;">SITE MANAGEMENT CLUSTER (oPT)</p>
-            <p style="margin: 5px 0 0 0; font-size: 13px; color: #3D405B;">Report Date: {report_date}</p>
+            <p style="margin: 5px 0 0 0; font-size: 13px; color: #3D405B;">Report Date (as of): {report_date}</p>
         </div>
 
         <div style="padding: 30px;">
@@ -328,7 +328,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
             {content_html}
             
             <p style="margin-top: 30px; font-size: 13px; color: #3D405B; line-height: 1.5; text-align: center;">
-                This is an automated report generated at 06:15 PM Amman Time. It summarizes incidents reported today({report_date}). <br>
+                This is an automated report generated at 06:15 PM Amman Time. It summarizes all new incidents submitted to the system over the past 24 hours (as of {report_date}). <br>
                 <em>Two Excel files are attached: Internal Full Data and External Truncated Data.</em>
             </p>
         </div>
