@@ -103,7 +103,7 @@ LOGO_URL = 'https://raw.githubusercontent.com/smcopt/incident_alert/main/Country
 # 'YYYY-MM-DD', which sort chronologically as plain text. To order by the report date
 # instead, set this to 'Details of Alert-Date of report'.
 SORT_DATE_FIELD = 'Details of Alert-Date of the incident'
-SORT_NEWEST_FIRST = True   # True = most recent at the top; set False for oldest-first
+SORT_NEWEST_FIRST = False   # True = most recent at the top; set False for oldest-first
 SHEET_TAB_NAME = 'ALERT'
 
 def run_workflow(request):
