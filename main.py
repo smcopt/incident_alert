@@ -44,17 +44,22 @@ _SECTION_PREFIX_RE = re.compile(
     r'|top needs-)'
 )
 
+# The API renamed the region/location group's slash-prefix from 'Site Information/' to
+# 'Region Information/', but the existing sheet header still uses 'Site Information/'.
+# Collapse both to a common token so old header columns match the renamed API keys.
+_SLASH_PREFIX_RE = re.compile(r'^(site information/|region information/)')
+
 
 def _leaf(name):
     """Canonical leaf name: drop ' [Most Recent]', drop pandas '.1'/'.2', drop the
-    section/group prefix, collapse whitespace, lowercase. Slash-prefixed names
-    ('Site Information/...', 'Region Information/...') are left intact since they are
-    identical across both API shapes."""
+    section/group prefix (dash groups and the Site/Region Information slash group),
+    collapse whitespace, lowercase."""
     s = str(name)
     s = re.sub(r'\s*\[most recent\]\s*$', '', s, flags=re.I)   # ' [Most Recent]'
     s = re.sub(r'\.\d+$', '', s)                               # pandas '.1' / '.2'
     s = re.sub(r'\s+', ' ', s).strip().lower()
     s = _SECTION_PREFIX_RE.sub('', s)                          # 'Event Information-' etc.
+    s = _SLASH_PREFIX_RE.sub('', s)                            # 'Site/Region Information/'
     return s.strip()
 
 
