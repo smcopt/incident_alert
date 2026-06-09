@@ -16,6 +16,38 @@ from email import encoders
 from googleapiclient.discovery import build
 from openpyxl.styles import Font
 from datetime import datetime, timedelta, timezone
+import re
+
+
+# --- FIELD-LOOKUP HELPERS (tolerant to API key renames) ---
+# The Zite API has changed field names over time (e.g. 'Case Id' -> 'Case ID',
+# and dropping the ' [Most Recent]' suffix that the Google Sheet header still uses).
+# These helpers normalise away those differences so a rename can't silently break
+# the pipeline again.
+
+def _norm(s):
+    """Normalise a field name: drop a trailing '[Most Recent]' tag and collapse whitespace."""
+    s = str(s)
+    s = re.sub(r'\s*\[Most Recent\]\s*$', '', s)   # strip suffix variants ('  [Most Recent]', ' [Most Recent]')
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+
+def fget(item, base_name, default=''):
+    """Fetch a value by field name, tolerant to ' [Most Recent]' suffixes and inconsistent spacing."""
+    target = _norm(base_name)
+    for k, v in item.items():
+        if _norm(k) == target:
+            return v if v is not None else default
+    return default
+
+
+def get_case_id(item):
+    """Return the case identifier regardless of 'Case ID' / 'Case Id' / spacing variants."""
+    for k, v in item.items():
+        if _norm(k).lower() == 'case id' and str(v).strip():
+            return str(v).strip()
+    return ''
 
 
 # --- CONFIGURATION ---
@@ -70,7 +102,14 @@ def run_workflow(request):
         # 3. Get Existing Data to Prevent Duplicates
         result = sheet_service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID, range="ALERT!A:A").execute()
-        existing_ids = set([row[0] for row in result.get('values', []) if row])
+        existing_ids = set([str(row[0]).strip() for row in result.get('values', []) if row and str(row[0]).strip()])
+
+        # Read the existing header row (row 1) so we can append new rows in the
+        # exact column order the sheet already uses, regardless of API key order.
+        hdr_result = sheet_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID, range="ALERT!1:1").execute()
+        sheet_header = hdr_result.get('values', [[]])
+        sheet_header = sheet_header[0] if sheet_header else []
 
         # 4. Fetch API Data
         response = requests.get(API_URL)
@@ -81,36 +120,49 @@ def run_workflow(request):
         all_keys = []
 
         if api_data:
+            print(f"Fetched {len(api_data)} records from API.")
             # Dynamically grab all column headers for Excel/Sheets
             for item in api_data:
                 for k in item.keys():
                     if k not in all_keys:
                         all_keys.append(k)
-            
-            # Force 'Case Id' to always be Column A
-            if 'Case Id' in all_keys:
-                all_keys.remove('Case Id')
-                all_keys.insert(0, 'Case Id')
 
-            if not existing_ids:
-                new_records_for_sheet.append(all_keys)
+            # Force the case-id column to always be Column A (tolerant to ID/Id variants)
+            for ck in list(all_keys):
+                if _norm(ck).lower() == 'case id':
+                    all_keys.remove(ck)
+                    all_keys.insert(0, ck)
+                    break
+
+            # Use the sheet's existing header order if present; otherwise (first-ever
+            # run on an empty sheet) define the columns from the API and write a header.
+            if sheet_header:
+                output_header = sheet_header
+            else:
+                output_header = all_keys
+                new_records_for_sheet.append(output_header)
 
             for item in api_data:
-                case_id = str(item.get('Case Id', ''))
-                
+                case_id = get_case_id(item)
+
                 # Exclude incidents from sites that are no longer active
-                site_status = str(item.get('Site Information/Site Status', '')).strip().lower()
+                site_status = str(fget(item, 'Site Information/Site Status', '')).strip().lower()
                 if site_status in ['inactive', 'not found']:
                     continue
-                
+
                 if case_id and case_id not in existing_ids:
-                    # Append ALL fields for Sheet/Excel
-                    row_data = [str(item.get(key, '')) for key in all_keys]
+                    # Append fields in the sheet's column order (matched by name, suffix-tolerant)
+                    row_data = []
+                    for col in output_header:
+                        if _norm(col).lower() == 'case id':
+                            row_data.append(case_id)
+                        else:
+                            row_data.append(str(fget(item, col, '')))
                     new_records_for_sheet.append(row_data)
 
                     # --- Handle "Other" Logic ---
-                    raw_main_incident = str(item.get('Event Information-What was the main incident? [Most Recent]', '')).strip()
-                    raw_other_incident = str(item.get('Event Information-If other, please specify  [Most Recent]', '')).strip()
+                    raw_main_incident = str(fget(item, 'Event Information-What was the main incident?', '')).strip()
+                    raw_other_incident = str(fget(item, 'Event Information-If other, please specify', '')).strip()
                     
                     if not raw_main_incident or raw_main_incident.lower() == 'other':
                         final_main_incident = raw_other_incident if raw_other_incident else 'N/A'
@@ -119,28 +171,30 @@ def run_workflow(request):
 
                     # Create a structured dictionary of the renamed fields for Email & External Excel
                     email_incident = {
-                        "Site ID": item.get('Site ID', 'N/A'),
-                        "Site Name": item.get('Site Name', 'N/A'),
-                        "Site Name (Arabic)": item.get('Site Information/Site Name (Arabic)', 'N/A'),
-                        # UPDATED: 'Site Information' changed to 'Region Information'
-                        "Governorate": item.get('Region Information/First Level Region Name', 'N/A'),
-                        "Neighborhood": item.get('Region Information/Second Level Region Name', 'N/A'),
-                        "Agency Name": item.get('Site Information/Site Type', 'N/A'),
-                        "Name of Reporter": item.get('Details of Alert-Name of Person Completing the Form  [Most Recent]', 'N/A'),
-                        "Reporter Contact Information": item.get("Details of Alert-Please provide the reporter's contact information in case we need to follow up.  [Most Recent]", 'N/A'),
+                        "Site ID": fget(item, 'Site ID', 'N/A'),
+                        "Site Name": fget(item, 'Site Name', 'N/A'),
+                        "Site Name (Arabic)": fget(item, 'Site Information/Site Name (Arabic)', 'N/A'),
+                        # 'Site Information' was renamed to 'Region Information' by the API
+                        "Governorate": fget(item, 'Region Information/First Level Region Name', 'N/A'),
+                        "Neighborhood": fget(item, 'Region Information/Second Level Region Name', 'N/A'),
+                        "Agency Name": fget(item, 'Site Information/Site Type', 'N/A'),
+                        "Name of Reporter": fget(item, 'Details of Alert-Name of Person Completing the Form', 'N/A'),
+                        "Reporter Contact Information": fget(item, "Details of Alert-Please provide the reporter's contact information in case we need to follow up.", 'N/A'),
                         "Main Incident": final_main_incident,
-                        "Details About the Incident": item.get('Event Information-Details about the incident (as relevant)  [Most Recent]', 'N/A'),
-                        "Individuals Affected": str(item.get('Impact of Incident-Individuals affected  [Most Recent]', '0')),
-                        "Households Affected": str(item.get('Impact of Incident-Households affected  [Most Recent]', '0')),
-                        "Shelters Completely Damaged": str(item.get('Impact of Incident-Number of Shelters Completely Damaged  [Most Recent]', '0')),
-                        "Shelters Partially Damaged": str(item.get('Impact of Incident-Number of Shelters Partially Damaged:  [Most Recent]', '0')),
-                        "HHs Sleeping Outside Shelter": str(item.get('Impact of Incident-Number of Households sleeping outside of shelter:  [Most Recent]', '0')),
-                        "Quantities Required for Support": item.get('Top Needs-Quantities Required for Support  [Most Recent]', 'N/A'),
-                        "URL": item.get('Url', '#')
+                        "Details About the Incident": fget(item, 'Event Information-Details about the incident (as relevant)', 'N/A'),
+                        "Individuals Affected": str(fget(item, 'Impact of Incident-Individuals affected', '0')),
+                        "Households Affected": str(fget(item, 'Impact of Incident-Households affected', '0')),
+                        "Shelters Completely Damaged": str(fget(item, 'Impact of Incident-Number of Shelters Completely Damaged', '0')),
+                        "Shelters Partially Damaged": str(fget(item, 'Impact of Incident-Number of Shelters Partially Damaged:', '0')),
+                        "HHs Sleeping Outside Shelter": str(fget(item, 'Impact of Incident-Number of Households sleeping outside of shelter:', '0')),
+                        "Quantities Required for Support": fget(item, 'Top Needs-Quantities Required for Support', 'N/A'),
+                        "URL": fget(item, 'Url', '#')
                     }
                     new_records_for_email.append(email_incident)
                 
         # 5. Update Sheet & Send Email
+        new_count = len(new_records_for_email)
+        print(f"{new_count} new record(s) to add after dedup/active-site filtering.")
         if new_records_for_sheet:
             sheet_service.spreadsheets().values().append(
                 spreadsheetId=SPREADSHEET_ID,
@@ -148,10 +202,10 @@ def run_workflow(request):
                 valueInputOption="RAW",
                 body={"values": new_records_for_sheet}
             ).execute()
-            
+
             # Send the data to the email logic
-            data_to_excel = new_records_for_sheet[1:] if not existing_ids else new_records_for_sheet
-            send_beautified_email(gmail_service, new_records_for_email, full_data=data_to_excel, headers=all_keys)
+            data_to_excel = new_records_for_sheet[1:] if not sheet_header else new_records_for_sheet
+            send_beautified_email(gmail_service, new_records_for_email, full_data=data_to_excel, headers=output_header)
         else:
             send_beautified_email(gmail_service, None)
 
