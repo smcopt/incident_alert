@@ -17,35 +17,68 @@ from googleapiclient.discovery import build
 from openpyxl.styles import Font
 from datetime import datetime, timedelta, timezone
 import re
+from collections import defaultdict
 
 
-# --- FIELD-LOOKUP HELPERS (tolerant to API key renames) ---
-# The Zite API has changed field names over time (e.g. 'Case Id' -> 'Case ID',
-# and dropping the ' [Most Recent]' suffix that the Google Sheet header still uses).
-# These helpers normalise away those differences so a rename can't silently break
-# the pipeline again.
+# --- FIELD-LOOKUP HELPERS (tolerant to API key format changes) ---
+# The Zite API ships fields in two shapes that we must both support:
+#   * "prefixed"  e.g. 'Details of Alert-Name of Person Completing the Form'
+#   * "flattened" e.g. 'Name of Person Completing the Form' (group prefixes stripped),
+#                 where names that then collide get pandas-style '.1'/'.2' suffixes
+#                 (e.g. three 'Adult males (18+)' fields -> '', '.1', '.2').
+# The Google Sheet header additionally carries a trailing ' [Most Recent]' tag and
+# uses 'Case Id' instead of 'Case ID'.
+#
+# Strategy: reduce every name to a canonical "leaf" (prefix + suffix + tag removed,
+# lowercased) and resolve duplicates by ORDER OF APPEARANCE. Because the deaths /
+# injuries / missing blocks appear in the same order in both shapes and in the sheet
+# header, occurrence-index matching is correct regardless of which shape arrives.
 
-def _norm(s):
-    """Normalise a field name: drop a trailing '[Most Recent]' tag and collapse whitespace."""
-    s = str(s)
-    s = re.sub(r'\s*\[Most Recent\]\s*$', '', s)   # strip suffix variants ('  [Most Recent]', ' [Most Recent]')
-    s = re.sub(r'\s+', ' ', s).strip()
-    return s
+# Longest / most specific prefixes first so nested ones are removed before the parent.
+_SECTION_PREFIX_RE = re.compile(
+    r'^(details of alert-'
+    r'|event information-'
+    r'|impact of incident-reported [^-]+?-'     # reported deaths- / injuries- / missing persons-
+    r'|impact of incident-facility damage-'
+    r'|impact of incident-'
+    r'|top needs-)'
+)
 
 
-def fget(item, base_name, default=''):
-    """Fetch a value by field name, tolerant to ' [Most Recent]' suffixes and inconsistent spacing."""
-    target = _norm(base_name)
-    for k, v in item.items():
-        if _norm(k) == target:
-            return v if v is not None else default
+def _leaf(name):
+    """Canonical leaf name: drop ' [Most Recent]', drop pandas '.1'/'.2', drop the
+    section/group prefix, collapse whitespace, lowercase. Slash-prefixed names
+    ('Site Information/...', 'Region Information/...') are left intact since they are
+    identical across both API shapes."""
+    s = str(name)
+    s = re.sub(r'\s*\[most recent\]\s*$', '', s, flags=re.I)   # ' [Most Recent]'
+    s = re.sub(r'\.\d+$', '', s)                               # pandas '.1' / '.2'
+    s = re.sub(r'\s+', ' ', s).strip().lower()
+    s = _SECTION_PREFIX_RE.sub('', s)                          # 'Event Information-' etc.
+    return s.strip()
+
+
+def build_occ(item):
+    """Map each leaf name -> list of the item's actual keys, in JSON order."""
+    occ = defaultdict(list)
+    for k in item.keys():
+        occ[_leaf(k)].append(k)
+    return occ
+
+
+def rget(item, occ, wanted_name, occurrence=0, default=''):
+    """Fetch a value by leaf name, picking the Nth occurrence (0-based)."""
+    keys = occ.get(_leaf(wanted_name), [])
+    if occurrence < len(keys):
+        v = item.get(keys[occurrence], default)
+        return default if v is None else v
     return default
 
 
 def get_case_id(item):
-    """Return the case identifier regardless of 'Case ID' / 'Case Id' / spacing variants."""
+    """Return the case identifier regardless of 'Case ID' / 'Case Id' / spacing."""
     for k, v in item.items():
-        if _norm(k).lower() == 'case id' and str(v).strip():
+        if _leaf(k) == 'case id' and str(v).strip():
             return str(v).strip()
     return ''
 
@@ -104,8 +137,8 @@ def run_workflow(request):
             spreadsheetId=SPREADSHEET_ID, range="ALERT!A:A").execute()
         existing_ids = set([str(row[0]).strip() for row in result.get('values', []) if row and str(row[0]).strip()])
 
-        # Read the existing header row (row 1) so we can append new rows in the
-        # exact column order the sheet already uses, regardless of API key order.
+        # Read the existing header row (row 1) so new rows are written in the sheet's
+        # own column order, matched by leaf name regardless of the API's key format.
         hdr_result = sheet_service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID, range="ALERT!1:1").execute()
         sheet_header = hdr_result.get('values', [[]])
@@ -121,7 +154,7 @@ def run_workflow(request):
 
         if api_data:
             print(f"Fetched {len(api_data)} records from API.")
-            # Dynamically grab all column headers for Excel/Sheets
+            # Dynamically grab all column headers for Excel/Sheets (first-run fallback)
             for item in api_data:
                 for k in item.keys():
                     if k not in all_keys:
@@ -129,7 +162,7 @@ def run_workflow(request):
 
             # Force the case-id column to always be Column A (tolerant to ID/Id variants)
             for ck in list(all_keys):
-                if _norm(ck).lower() == 'case id':
+                if _leaf(ck) == 'case id':
                     all_keys.remove(ck)
                     all_keys.insert(0, ck)
                     break
@@ -143,26 +176,33 @@ def run_workflow(request):
                 new_records_for_sheet.append(output_header)
 
             for item in api_data:
+                occ = build_occ(item)
                 case_id = get_case_id(item)
 
                 # Exclude incidents from sites that are no longer active
-                site_status = str(fget(item, 'Site Information/Site Status', '')).strip().lower()
+                site_status = str(rget(item, occ, 'Site Information/Site Status', 0, '')).strip().lower()
                 if site_status in ['inactive', 'not found']:
                     continue
 
                 if case_id and case_id not in existing_ids:
-                    # Append fields in the sheet's column order (matched by name, suffix-tolerant)
+                    # Build the row in the sheet's column order. Repeated leaf names
+                    # (e.g. the deaths/injuries/missing 'Adult males (18+)' triplets)
+                    # are matched by order of appearance via a per-row occurrence counter.
                     row_data = []
+                    leaf_counter = defaultdict(int)
                     for col in output_header:
-                        if _norm(col).lower() == 'case id':
+                        lf = _leaf(col)
+                        if lf == 'case id':
                             row_data.append(case_id)
-                        else:
-                            row_data.append(str(fget(item, col, '')))
+                            continue
+                        idx = leaf_counter[lf]
+                        leaf_counter[lf] += 1
+                        row_data.append(str(rget(item, occ, col, idx, '')))
                     new_records_for_sheet.append(row_data)
 
                     # --- Handle "Other" Logic ---
-                    raw_main_incident = str(fget(item, 'Event Information-What was the main incident?', '')).strip()
-                    raw_other_incident = str(fget(item, 'Event Information-If other, please specify', '')).strip()
+                    raw_main_incident = str(rget(item, occ, 'Event Information-What was the main incident?', 0, '')).strip()
+                    raw_other_incident = str(rget(item, occ, 'Event Information-If other, please specify', 0, '')).strip()
                     
                     if not raw_main_incident or raw_main_incident.lower() == 'other':
                         final_main_incident = raw_other_incident if raw_other_incident else 'N/A'
@@ -171,30 +211,29 @@ def run_workflow(request):
 
                     # Create a structured dictionary of the renamed fields for Email & External Excel
                     email_incident = {
-                        "Site ID": fget(item, 'Site ID', 'N/A'),
-                        "Site Name": fget(item, 'Site Name', 'N/A'),
-                        "Site Name (Arabic)": fget(item, 'Site Information/Site Name (Arabic)', 'N/A'),
+                        "Site ID": rget(item, occ, 'Site ID', 0, 'N/A'),
+                        "Site Name": rget(item, occ, 'Site Name', 0, 'N/A'),
+                        "Site Name (Arabic)": rget(item, occ, 'Site Information/Site Name (Arabic)', 0, 'N/A'),
                         # 'Site Information' was renamed to 'Region Information' by the API
-                        "Governorate": fget(item, 'Region Information/First Level Region Name', 'N/A'),
-                        "Neighborhood": fget(item, 'Region Information/Second Level Region Name', 'N/A'),
-                        "Agency Name": fget(item, 'Site Information/Site Type', 'N/A'),
-                        "Name of Reporter": fget(item, 'Details of Alert-Name of Person Completing the Form', 'N/A'),
-                        "Reporter Contact Information": fget(item, "Details of Alert-Please provide the reporter's contact information in case we need to follow up.", 'N/A'),
+                        "Governorate": rget(item, occ, 'Region Information/First Level Region Name', 0, 'N/A'),
+                        "Neighborhood": rget(item, occ, 'Region Information/Second Level Region Name', 0, 'N/A'),
+                        "Agency Name": rget(item, occ, 'Site Information/Site Type', 0, 'N/A'),
+                        "Name of Reporter": rget(item, occ, 'Details of Alert-Name of Person Completing the Form', 0, 'N/A'),
+                        "Reporter Contact Information": rget(item, occ, "Details of Alert-Please provide the reporter's contact information in case we need to follow up.", 0, 'N/A'),
                         "Main Incident": final_main_incident,
-                        "Details About the Incident": fget(item, 'Event Information-Details about the incident (as relevant)', 'N/A'),
-                        "Individuals Affected": str(fget(item, 'Impact of Incident-Individuals affected', '0')),
-                        "Households Affected": str(fget(item, 'Impact of Incident-Households affected', '0')),
-                        "Shelters Completely Damaged": str(fget(item, 'Impact of Incident-Number of Shelters Completely Damaged', '0')),
-                        "Shelters Partially Damaged": str(fget(item, 'Impact of Incident-Number of Shelters Partially Damaged:', '0')),
-                        "HHs Sleeping Outside Shelter": str(fget(item, 'Impact of Incident-Number of Households sleeping outside of shelter:', '0')),
-                        "Quantities Required for Support": fget(item, 'Top Needs-Quantities Required for Support', 'N/A'),
-                        "URL": fget(item, 'Url', '#')
+                        "Details About the Incident": rget(item, occ, 'Event Information-Details about the incident (as relevant)', 0, 'N/A'),
+                        "Individuals Affected": str(rget(item, occ, 'Impact of Incident-Individuals affected', 0, '0')),
+                        "Households Affected": str(rget(item, occ, 'Impact of Incident-Households affected', 0, '0')),
+                        "Shelters Completely Damaged": str(rget(item, occ, 'Impact of Incident-Number of Shelters Completely Damaged', 0, '0')),
+                        "Shelters Partially Damaged": str(rget(item, occ, 'Impact of Incident-Number of Shelters Partially Damaged:', 0, '0')),
+                        "HHs Sleeping Outside Shelter": str(rget(item, occ, 'Impact of Incident-Number of Households sleeping outside of shelter:', 0, '0')),
+                        "Quantities Required for Support": rget(item, occ, 'Top Needs-Quantities Required for Support', 0, 'N/A'),
+                        "URL": rget(item, occ, 'Url', 0, '#')
                     }
                     new_records_for_email.append(email_incident)
                 
         # 5. Update Sheet & Send Email
-        new_count = len(new_records_for_email)
-        print(f"{new_count} new record(s) to add after dedup/active-site filtering.")
+        print(f"{len(new_records_for_email)} new record(s) after dedup/active-site filtering.")
         if new_records_for_sheet:
             sheet_service.spreadsheets().values().append(
                 spreadsheetId=SPREADSHEET_ID,
