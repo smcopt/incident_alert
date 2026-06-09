@@ -98,6 +98,14 @@ SERVICE_ACCOUNT_EMAIL = 'incident-alert@incidentalert-490412.iam.gserviceaccount
 # PASTE YOUR GITHUB RAW LOGO URL HERE:
 LOGO_URL = 'https://raw.githubusercontent.com/smcopt/incident_alert/main/CountryLogo_Palestine_V01.png'
 
+# --- SORT SETTINGS ---
+# Field used to order rows (matched by leaf name). The incident-date values are ISO
+# 'YYYY-MM-DD', which sort chronologically as plain text. To order by the report date
+# instead, set this to 'Details of Alert-Date of report'.
+SORT_DATE_FIELD = 'Details of Alert-Date of the incident'
+SORT_NEWEST_FIRST = True   # True = most recent at the top; set False for oldest-first
+SHEET_TAB_NAME = 'ALERT'
+
 def run_workflow(request):
     try:
         # 1. Base Keyless Authentication
@@ -222,6 +230,7 @@ def run_workflow(request):
                         # 'Site Information' was renamed to 'Region Information' by the API
                         "Governorate": rget(item, occ, 'Region Information/First Level Region Name', 0, 'N/A'),
                         "Neighborhood": rget(item, occ, 'Region Information/Second Level Region Name', 0, 'N/A'),
+                        "Date of Incident": rget(item, occ, 'Details of Alert-Date of the incident', 0, 'N/A'),
                         "Agency Name": rget(item, occ, 'Site Information/Site Type', 0, 'N/A'),
                         "Name of Reporter": rget(item, occ, 'Details of Alert-Name of Person Completing the Form', 0, 'N/A'),
                         "Reporter Contact Information": rget(item, occ, "Details of Alert-Please provide the reporter's contact information in case we need to follow up.", 0, 'N/A'),
@@ -240,12 +249,48 @@ def run_workflow(request):
         # 5. Update Sheet & Send Email
         print(f"{len(new_records_for_email)} new record(s) after dedup/active-site filtering.")
         if new_records_for_sheet:
+            # --- Sort this batch by incident date (ISO 'YYYY-MM-DD' sorts as text) ---
+            # Keep a first-run header row pinned at the top while sorting only data rows.
+            date_idx = next((i for i, c in enumerate(output_header)
+                             if _leaf(c) == _leaf(SORT_DATE_FIELD)), None)
+            if not sheet_header and new_records_for_sheet:
+                header_row, data_rows = new_records_for_sheet[0], new_records_for_sheet[1:]
+            else:
+                header_row, data_rows = None, new_records_for_sheet
+            if date_idx is not None:
+                data_rows.sort(key=lambda r: r[date_idx] if date_idx < len(r) else '',
+                               reverse=SORT_NEWEST_FIRST)
+            new_records_for_sheet = ([header_row] if header_row else []) + data_rows
+            new_records_for_email.sort(key=lambda d: d.get('Date of Incident', ''),
+                                       reverse=SORT_NEWEST_FIRST)
+
             sheet_service.spreadsheets().values().append(
                 spreadsheetId=SPREADSHEET_ID,
-                range="ALERT!A1",
+                range=f"{SHEET_TAB_NAME}!A1",
                 valueInputOption="RAW",
                 body={"values": new_records_for_sheet}
             ).execute()
+
+            # --- Keep the WHOLE sheet sorted by incident date every run ---
+            # (reorders existing rows in place; does not touch values or the header)
+            try:
+                if date_idx is not None:
+                    meta = sheet_service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+                    tab_id = next((s['properties']['sheetId'] for s in meta.get('sheets', [])
+                                   if s['properties']['title'] == SHEET_TAB_NAME), None)
+                    if tab_id is not None:
+                        sheet_service.spreadsheets().batchUpdate(
+                            spreadsheetId=SPREADSHEET_ID,
+                            body={"requests": [{"sortRange": {
+                                "range": {"sheetId": tab_id, "startRowIndex": 1},
+                                "sortSpecs": [{
+                                    "dimensionIndex": date_idx,
+                                    "sortOrder": "DESCENDING" if SORT_NEWEST_FIRST else "ASCENDING"
+                                }]
+                            }}]}
+                        ).execute()
+            except Exception as sort_err:
+                print(f"Warning: sheet re-sort skipped: {sort_err}")
 
             # Send the data to the email logic
             data_to_excel = new_records_for_sheet[1:] if not sheet_header else new_records_for_sheet
@@ -294,8 +339,8 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
     if summary_data:
         # Define the exact columns for the external sheet (excludes 'URL')
         ext_cols = [
-            "Site ID", "Site Name", "Site Name (Arabic)", "Governorate", "Neighborhood", 
-            "Agency Name", "Name of Reporter", "Reporter Contact Information", 
+            "Site ID", "Site Name", "Site Name (Arabic)", "Governorate", "Neighborhood",
+            "Date of Incident", "Agency Name", "Name of Reporter", "Reporter Contact Information",
             "Main Incident", "Details About the Incident", "Individuals Affected", 
             "Households Affected", "Shelters Completely Damaged", "Shelters Partially Damaged", 
             "HHs Sleeping Outside Shelter", "Quantities Required for Support"
