@@ -92,7 +92,8 @@ def get_case_id(item):
 SPREADSHEET_ID = '15cGy5EhzuR330e6XmFaAXSaokoRsFxBUugzXybPqZkw'
 SENDER_EMAIL = 'info@smcopt.org'
 RECIPIENT_EMAIL = 'coordination@smcopt.org'
-API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=2137&key=7kq1bSino0AcI86hIFbmM6mmTU425121134211' 
+API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=9776&key=3XUnDvTu9hGTW3r2TIZYlBhocQA2671372018'
+REPEAT_API_URL = 'https://app.zitemanager.org/api/v2/reports-file/?report_id=9776&key=3XUnDvTu9hGTW3r2TIZYlBhocQA2671372018&file_type=repeat'
 SERVICE_ACCOUNT_EMAIL = 'incident-alert@incidentalert-490412.iam.gserviceaccount.com'
 
 # PASTE YOUR GITHUB RAW LOGO URL HERE:
@@ -101,10 +102,43 @@ LOGO_URL = 'https://raw.githubusercontent.com/smcopt/incident_alert/main/Country
 # --- SORT SETTINGS ---
 # Field used to order rows (matched by leaf name). The incident-date values are ISO
 # 'YYYY-MM-DD', which sort chronologically as plain text. To order by the report date
-# instead, set this to 'Details of Alert-Date of report'.
-SORT_DATE_FIELD = 'Details of Alert-Date of the incident'
+# instead, set this to 'date_report'.
+SORT_DATE_FIELD = 'incident_date'
 SORT_NEWEST_FIRST = False   # True = most recent at the top; set False for oldest-first
 SHEET_TAB_NAME = 'ALERT'
+
+# Response items: (api_suffix, display label). The main form carries a requested
+# quantity (qty_<suffix>), a delivered total (qty_delivered_<suffix>) and a remaining
+# total (qty_remaining_<suffix>) for each. All are "number of HH needing <item>".
+ITEM_FIELDS = [
+    ("tents", "Tents"),
+    ("tarpaulins", "Tarpaulins / plastic sheets"),
+    ("sandbags", "Sandbags"),
+    ("bedding", "Bedding kits"),
+    ("nfi_kit", "NFI kits"),
+    ("clothing", "Clothing"),
+    ("rodent_control", "Rodent / pest control"),
+    ("medical_hygiene", "Medical / hygiene"),
+    ("food_parcels", "Food parcels"),
+    ("cash", "Cash assistance"),
+    ("latrines", "Latrines / toilet access"),
+    ("water", "Water / water tanks"),
+    ("engineering", "Engineering / drainage"),
+    ("shelter_repair", "Shelter repair materials"),
+    ("lighting", "Lighting"),
+    ("fuel", "Fuel / heating"),
+    ("pss", "PSS support"),
+    ("other", "Other assistance"),
+]
+
+
+def _to_int(v):
+    """Best-effort integer from an API value that may be '', None, '5' or 5."""
+    try:
+        s = str(v).strip()
+        return int(float(s)) if s not in ('', 'nan', 'None') else 0
+    except (ValueError, TypeError):
+        return 0
 
 def run_workflow(request):
     try:
@@ -157,12 +191,34 @@ def run_workflow(request):
         sheet_header = hdr_result.get('values', [[]])
         sheet_header = sheet_header[0] if sheet_header else []
 
-        # 4. Fetch API Data
+        # 4. Fetch API Data (main form)
         response = requests.get(API_URL)
-        api_data = response.json() 
+        api_data = response.json()
+
+        # 4b. Fetch the RESPONSE repeat-group and index it by Case ID.
+        # Each delivery entry links back to a main-form case via its 'Case ID'.
+        repeat_map = defaultdict(list)
+        try:
+            repeat_resp = requests.get(REPEAT_API_URL)
+            repeat_data = repeat_resp.json() or []
+            for rrow in repeat_data:
+                r_occ = build_occ(rrow)
+                r_cid = get_case_id(rrow)
+                if not r_cid:
+                    continue
+                repeat_map[r_cid].append({
+                    "item": str(rget(rrow, r_occ, 'd_item', 0, '')).strip(),
+                    "agency": str(rget(rrow, r_occ, 'd_agency', 0, '')).strip(),
+                    "hh": str(rget(rrow, r_occ, 'd_hh', 0, '')).strip(),
+                })
+            print(f"Fetched {sum(len(v) for v in repeat_map.values())} response/delivery record(s) "
+                  f"across {len(repeat_map)} case(s).")
+        except Exception as rep_err:
+            print(f"Warning: repeat-group fetch failed, continuing without deliveries: {rep_err}")
 
         new_records_for_sheet = []
         new_records_for_email = []
+        new_deliveries = []      # flat repeat-group rows joined with parent core info
         all_keys = []
 
         if api_data:
@@ -213,38 +269,86 @@ def run_workflow(request):
                         row_data.append(str(rget(item, occ, col, idx, '')))
                     new_records_for_sheet.append(row_data)
 
-                    # --- Handle "Other" Logic ---
-                    raw_main_incident = str(rget(item, occ, 'Event Information-What was the main incident?', 0, '')).strip()
-                    raw_other_incident = str(rget(item, occ, 'Event Information-If other, please specify', 0, '')).strip()
+                    # --- Handle "Other" Logic (event_type / event_type_other) ---
+                    raw_main_incident = str(rget(item, occ, 'event_type', 0, '')).strip()
+                    raw_other_incident = str(rget(item, occ, 'event_type_other', 0, '')).strip()
                     
                     if not raw_main_incident or raw_main_incident.lower() == 'other':
                         final_main_incident = raw_other_incident if raw_other_incident else 'N/A'
                     else:
                         final_main_incident = raw_main_incident
 
+                    # Deliveries linked from the response repeat-group by Case ID
+                    deliveries = repeat_map.get(case_id, [])
+                    deliveries_text = "; ".join(
+                        f"{d['agency'] or 'N/A'}: {d['item'] or 'N/A'}"
+                        + (f" ({d['hh']} HH)" if d['hh'] else "")
+                        for d in deliveries
+                    ) if deliveries else ""
+
+                    # Per-item ask vs delivered vs remaining (only items with any activity)
+                    needs_breakdown = []
+                    for suffix, label in ITEM_FIELDS:
+                        ask = _to_int(rget(item, occ, f'qty_{suffix}', 0, ''))
+                        delivered = _to_int(rget(item, occ, f'qty_delivered_{suffix}', 0, ''))
+                        remaining = _to_int(rget(item, occ, f'qty_remaining_{suffix}', 0, ''))
+                        if ask or delivered or remaining:
+                            needs_breakdown.append({
+                                "item": label, "ask": ask, "delivered": delivered, "remaining": remaining
+                            })
+
+                    governorate = rget(item, occ, 'Region Information/First Level Region Name', 0, 'N/A')
+                    neighborhood = rget(item, occ, 'Region Information/Second Level Region Name', 0, 'N/A')
+                    response_status = str(rget(item, occ, 'response_provided', 0, 'N/A')).strip() or 'N/A'
+
                     # Create a structured dictionary of the renamed fields for Email & External Excel
                     email_incident = {
                         "Site ID": rget(item, occ, 'Site ID', 0, 'N/A'),
                         "Site Name": rget(item, occ, 'Site Name', 0, 'N/A'),
                         "Site Name (Arabic)": rget(item, occ, 'Site Information/Site Name (Arabic)', 0, 'N/A'),
-                        # 'Site Information' was renamed to 'Region Information' by the API
-                        "Governorate": rget(item, occ, 'Region Information/First Level Region Name', 0, 'N/A'),
-                        "Neighborhood": rget(item, occ, 'Region Information/Second Level Region Name', 0, 'N/A'),
-                        "Date of Incident": rget(item, occ, 'Details of Alert-Date of the incident', 0, 'N/A'),
-                        "Agency Name": rget(item, occ, 'Site Information/Site Type', 0, 'N/A'),
-                        "Name of Reporter": rget(item, occ, 'Details of Alert-Name of Person Completing the Form', 0, 'N/A'),
-                        "Reporter Contact Information": rget(item, occ, "Details of Alert-Please provide the reporter's contact information in case we need to follow up.", 0, 'N/A'),
+                        "Governorate": governorate,
+                        "Neighborhood": neighborhood,
+                        "Date of Incident": rget(item, occ, 'incident_date', 0, 'N/A'),
+                        "Report Type": rget(item, occ, 'report_type', 0, ''),
+                        "Agency Name": rget(item, occ, 'Agency_name', 0, 'N/A'),
+                        "Site Type": rget(item, occ, 'Site Information/Site Type', 0, ''),
+                        "Name of Reporter": rget(item, occ, 'NameReporter', 0, 'N/A'),
+                        "Reporter Contact Information": rget(item, occ, 'Please_provide_the_r_we_need_to_follow_up', 0, 'N/A'),
                         "Main Incident": final_main_incident,
-                        "Details About the Incident": rget(item, occ, 'Event Information-Details about the incident (as relevant)', 0, 'N/A'),
-                        "Individuals Affected": str(rget(item, occ, 'Impact of Incident-Individuals affected', 0, '0')),
-                        "Households Affected": str(rget(item, occ, 'Impact of Incident-Households affected', 0, '0')),
-                        "Shelters Completely Damaged": str(rget(item, occ, 'Impact of Incident-Number of Shelters Completely Damaged', 0, '0')),
-                        "Shelters Partially Damaged": str(rget(item, occ, 'Impact of Incident-Number of Shelters Partially Damaged:', 0, '0')),
-                        "HHs Sleeping Outside Shelter": str(rget(item, occ, 'Impact of Incident-Number of Households sleeping outside of shelter:', 0, '0')),
-                        "Quantities Required for Support": rget(item, occ, 'Top Needs-Quantities Required for Support', 0, 'N/A'),
+                        "Impact / Result": rget(item, occ, 'impacts', 0, 'N/A'),
+                        "Details About the Incident": rget(item, occ, 'event_narrative', 0, 'N/A'),
+                        "Individuals Affected": str(rget(item, occ, 'individuals', 0, '0')),
+                        "Households Affected": str(rget(item, occ, 'households', 0, '0')),
+                        "Shelters Completely Damaged": str(rget(item, occ, 'total_shelter_damage', 0, '0')),
+                        "Shelters Partially Damaged": str(rget(item, occ, 'partially_damage', 0, '0')),
+                        "HHs Sleeping Outside Shelter": str(rget(item, occ, 'outside', 0, '0')),
+                        "Priority Needs": rget(item, occ, 'incident_needs', 0, 'N/A'),
+                        # --- Response section ---
+                        "Response Status": response_status,
+                        "Has Remaining Need": str(rget(item, occ, 'has_remaining_need', 0, '')).strip(),
+                        "Total Remaining (units)": str(rget(item, occ, 'total_remaining_hh', 0, '')).strip(),
+                        "Response Deliveries": deliveries_text,
+                        "_deliveries": deliveries,       # structured list for HTML rendering
+                        "_needs": needs_breakdown,       # per-item ask/delivered/remaining
                         "URL": rget(item, occ, 'Url', 0, '#')
                     }
                     new_records_for_email.append(email_incident)
+
+                    # Flat repeat-group rows: each delivery joined with parent core info
+                    for d in deliveries:
+                        new_deliveries.append({
+                            "Case ID": case_id,
+                            "Site ID": email_incident["Site ID"],
+                            "Site Name": email_incident["Site Name"],
+                            "Date of Incident": email_incident["Date of Incident"],
+                            "Governorate": governorate,
+                            "Neighborhood": neighborhood,
+                            "Main Incident": final_main_incident,
+                            "Response Status": response_status,
+                            "Delivered Item": d.get("item", ""),
+                            "Delivering Agency": d.get("agency", ""),
+                            "Households Reached": d.get("hh", ""),
+                        })
                 
         # 5. Update Sheet & Send Email
         print(f"{len(new_records_for_email)} new record(s) after dedup/active-site filtering.")
@@ -294,7 +398,8 @@ def run_workflow(request):
 
             # Send the data to the email logic
             data_to_excel = new_records_for_sheet[1:] if not sheet_header else new_records_for_sheet
-            send_beautified_email(gmail_service, new_records_for_email, full_data=data_to_excel, headers=output_header)
+            send_beautified_email(gmail_service, new_records_for_email, full_data=data_to_excel,
+                                  headers=output_header, deliveries=new_deliveries)
         else:
             send_beautified_email(gmail_service, None)
 
@@ -304,7 +409,7 @@ def run_workflow(request):
         print(f"Error: {e}")
         return f"Error: {e}", 500
 
-def send_beautified_email(service, summary_data, full_data=None, headers=None):
+def send_beautified_email(service, summary_data, full_data=None, headers=None, deliveries=None):
     # 1. Force the server to use Amman Timezone (UTC+3)
     amman_tz = timezone(timedelta(hours=3))
     
@@ -314,7 +419,28 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
     # 3. Calculate today and yesterday based securely on Amman time
     current_date = amman_time.strftime("%d-%m-%Y")
     report_date = current_date
-    
+
+    # Columns for the "Response Deliveries" sheet (added to BOTH Excel files)
+    delivery_cols = [
+        "Case ID", "Site ID", "Site Name", "Date of Incident", "Governorate", "Neighborhood",
+        "Main Incident", "Response Status", "Delivered Item", "Delivering Agency", "Households Reached"
+    ]
+
+    def _style_sheet(ws):
+        """Bold header + auto width (max 50), shared by every sheet we write."""
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        for col in ws.columns:
+            max_length = 0
+            column_letter = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except Exception:
+                    pass
+            ws.column_dimensions[column_letter].width = min((max_length + 2), 50)
+
     message = MIMEMultipart()
     message['to'] = RECIPIENT_EMAIL
     message['from'] = SENDER_EMAIL
@@ -322,11 +448,15 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
     
 
 
-    # --- 1. ATTACH FULL INTERNAL EXCEL ---
+    # --- 1. ATTACH FULL INTERNAL EXCEL (main data + Response Deliveries sheet) ---
     if full_data and headers:
-        df_full = pd.DataFrame(full_data, columns=headers)
         full_buffer = io.BytesIO()
-        df_full.to_excel(full_buffer, index=False, engine='openpyxl')
+        with pd.ExcelWriter(full_buffer, engine='openpyxl') as writer:
+            pd.DataFrame(full_data, columns=headers).to_excel(writer, index=False, sheet_name='Incidents')
+            _style_sheet(writer.sheets['Incidents'])
+            df_del = pd.DataFrame(deliveries or [], columns=delivery_cols)
+            df_del.to_excel(writer, index=False, sheet_name='Response Deliveries')
+            _style_sheet(writer.sheets['Response Deliveries'])
         full_buffer.seek(0)
         
         part_full = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -335,15 +465,16 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
         part_full.add_header('Content-Disposition', f'attachment; filename="Internal_SMC Site Alert - {current_date}.xlsx"')
         message.attach(part_full)
 
-    # --- 2. ATTACH TRUNCATED & FORMATTED EXTERNAL EXCEL ---
+    # --- 2. ATTACH TRUNCATED & FORMATTED EXTERNAL EXCEL (+ Response Deliveries sheet) ---
     if summary_data:
         # Define the exact columns for the external sheet (excludes 'URL')
         ext_cols = [
             "Site ID", "Site Name", "Site Name (Arabic)", "Governorate", "Neighborhood",
-            "Date of Incident", "Agency Name", "Name of Reporter", "Reporter Contact Information",
-            "Main Incident", "Details About the Incident", "Individuals Affected", 
-            "Households Affected", "Shelters Completely Damaged", "Shelters Partially Damaged", 
-            "HHs Sleeping Outside Shelter", "Quantities Required for Support"
+            "Date of Incident", "Report Type", "Agency Name", "Name of Reporter", "Reporter Contact Information",
+            "Main Incident", "Impact / Result", "Details About the Incident", "Individuals Affected",
+            "Households Affected", "Shelters Completely Damaged", "Shelters Partially Damaged",
+            "HHs Sleeping Outside Shelter", "Priority Needs",
+            "Response Status", "Has Remaining Need", "Total Remaining (units)", "Response Deliveries"
         ]
         
         df_ext = pd.DataFrame(summary_data, columns=ext_cols)
@@ -352,22 +483,10 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
         # Apply formatting to the external Excel file
         with pd.ExcelWriter(ext_buffer, engine='openpyxl') as writer:
             df_ext.to_excel(writer, index=False, sheet_name='Site Alerts')
-            worksheet = writer.sheets['Site Alerts']
-            
-            # Make headers bold and auto-adjust column width (max 50 wide)
-            for cell in worksheet[1]:
-                cell.font = Font(bold=True)
-                
-            for col in worksheet.columns:
-                max_length = 0
-                column_letter = col[0].column_letter
-                for cell in col:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(cell.value)
-                    except:
-                        pass
-                worksheet.column_dimensions[column_letter].width = min((max_length + 2), 50)
+            _style_sheet(writer.sheets['Site Alerts'])
+            df_del = pd.DataFrame(deliveries or [], columns=delivery_cols)
+            df_del.to_excel(writer, index=False, sheet_name='Response Deliveries')
+            _style_sheet(writer.sheets['Response Deliveries'])
 
         ext_buffer.seek(0)
         
@@ -387,6 +506,57 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
         
         # Build an HTML card for each incident
         for r in summary_data:
+            # Response status badge colour (keeps existing palette)
+            status = (r.get('Response Status') or 'N/A')
+            sl = status.lower()
+            if 'fully' in sl:
+                badge_bg = '#1B657C'      # teal   = fully responded
+            elif 'partial' in sl:
+                badge_bg = '#D4A373'      # tan    = partially responded
+            else:
+                badge_bg = '#EC6B4D'      # orange = not yet / unknown
+            # Linked deliveries (from the response repeat-group) as a table
+            dels = r.get('_deliveries') or []
+            if dels:
+                _rows = "".join(
+                    "<tr>"
+                    f"<td style='padding:4px 8px; border-bottom:1px solid #EEE; color:#3D405B;'>{d.get('agency') or 'N/A'}</td>"
+                    f"<td style='padding:4px 8px; border-bottom:1px solid #EEE; color:#3D405B;'>{d.get('item') or 'N/A'}</td>"
+                    f"<td style='padding:4px 8px; border-bottom:1px solid #EEE; color:#3D405B; text-align:center;'>{d.get('hh') or '-'}</td>"
+                    "</tr>" for d in dels
+                )
+                deliveries_html = (
+                    "<table width='100%' cellpadding='0' cellspacing='0' style='margin-top:6px; border-collapse:collapse; font-size:12px;'>"
+                    "<tr style='background-color:#F5F3E8;'>"
+                    "<th style='padding:5px 8px; text-align:left; color:#1B657C; border-bottom:1px solid #D4A373;'>Agency</th>"
+                    "<th style='padding:5px 8px; text-align:left; color:#1B657C; border-bottom:1px solid #D4A373;'>Item</th>"
+                    "<th style='padding:5px 8px; text-align:center; color:#1B657C; border-bottom:1px solid #D4A373;'>HH Reached</th>"
+                    f"</tr>{_rows}</table>"
+                )
+            else:
+                deliveries_html = "<span style='color:#3D405B;'>No deliveries recorded yet.</span>"
+            # Per-item ask vs delivered vs remaining as a table
+            needs = r.get('_needs') or []
+            if needs:
+                _nrows = "".join(
+                    "<tr>"
+                    f"<td style='padding:4px 8px; border-bottom:1px solid #EEE; color:#3D405B;'>{n['item']}</td>"
+                    f"<td style='padding:4px 8px; border-bottom:1px solid #EEE; color:#3D405B; text-align:center;'>{n['ask']}</td>"
+                    f"<td style='padding:4px 8px; border-bottom:1px solid #EEE; color:#3D405B; text-align:center;'>{n['delivered']}</td>"
+                    f"<td style='padding:4px 8px; border-bottom:1px solid #EEE; color:#EC6B4D; text-align:center; font-weight:bold;'>{n['remaining']}</td>"
+                    "</tr>" for n in needs
+                )
+                needs_html = (
+                    "<table width='100%' cellpadding='0' cellspacing='0' style='margin-top:6px; border-collapse:collapse; font-size:12px;'>"
+                    "<tr style='background-color:#F5F3E8;'>"
+                    "<th style='padding:5px 8px; text-align:left; color:#1B657C; border-bottom:1px solid #D4A373;'>Item</th>"
+                    "<th style='padding:5px 8px; text-align:center; color:#1B657C; border-bottom:1px solid #D4A373;'>Requested (HH)</th>"
+                    "<th style='padding:5px 8px; text-align:center; color:#1B657C; border-bottom:1px solid #D4A373;'>Delivered (HH)</th>"
+                    "<th style='padding:5px 8px; text-align:center; color:#1B657C; border-bottom:1px solid #D4A373;'>Remaining (HH)</th>"
+                    f"</tr>{_nrows}</table>"
+                )
+            else:
+                needs_html = "<span style='color:#3D405B;'>No itemised needs recorded.</span>"
             content_html += f"""
             <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px; border: 1px solid #D4A373; border-radius: 8px; font-family: Arial, sans-serif; background-color: #ffffff;">
                 <tr>
@@ -396,6 +566,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
                                 <td align="left">
                                     <h3 style="margin: 0; color: #1B657C; font-size: 18px;">{r.get('Site ID')} - {r.get('Site Name')}</h3>
                                     <p style="margin: 4px 0 0 0; font-size: 13px; color: #3D405B;">{r.get('Governorate')} - {r.get('Neighborhood')}</p>
+                                    <p style="margin: 2px 0 0 0; font-size: 12px; color: #3D405B;">Incident Date: {r.get('Date of Incident')}{(' &nbsp;|&nbsp; via ' + r.get('Report Type')) if r.get('Report Type') else ''}</p>
                                 </td>
                                 <td align="right" valign="top">
                                     <span style="display: inline-block; padding: 6px 10px; background-color: #EC6B4D; color: #F5F3E8; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
@@ -434,13 +605,34 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None):
                             <tr>
                                 <td style="color: #3D405B;"><strong>HHs Sleeping Outside:</strong></td>
                                 <td style="color: #3D405B;">{r.get('HHs Sleeping Outside Shelter')}</td>
-                                <td style="color: #3D405B;"><strong>Quantities Required for Support:</strong></td>
-                                <td style="color: #3D405B;">{r.get('Quantities Required for Support')}</td>
+                                <td style="color: #3D405B;"><strong>Priority Needs:</strong></td>
+                                <td style="color: #3D405B;">{r.get('Priority Needs')}</td>
                             </tr>
                             <tr>
                                 <td colspan="4" style="padding-top: 15px; border-top: 1px dashed #D4A373;">
                                     <strong style="color: #3D405B;">Details:</strong><br>
                                     <span style="color: #3D405B; line-height: 1.5; display: inline-block; margin-top: 5px;">{r.get('Details About the Incident')}</span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td colspan="4" style="padding-top: 15px; border-top: 1px dashed #D4A373;">
+                                    <strong style="color: #1B657C; font-size: 14px;">RESPONSE</strong>
+                                    <table width="100%" cellpadding="6" cellspacing="0" style="font-size: 13px; margin-top: 6px;">
+                                        <tr>
+                                            <td width="25%" style="color: #3D405B;"><strong>Status:</strong></td>
+                                            <td width="25%"><span style="display: inline-block; padding: 3px 8px; background-color: {badge_bg}; color: #F5F3E8; border-radius: 4px; font-weight: bold; font-size: 12px;">{status}</span></td>
+                                            <td width="25%" style="color: #3D405B;"><strong>Remaining Need:</strong></td>
+                                            <td width="25%" style="color: #3D405B;">{r.get('Has Remaining Need') or 'N/A'}{(' (' + r.get('Total Remaining (units)') + ' HH)') if r.get('Total Remaining (units)') else ''}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="color: #3D405B; vertical-align: top;"><strong>Ask vs Response:</strong></td>
+                                            <td colspan="3">{needs_html}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="color: #3D405B; vertical-align: top;"><strong>Deliveries:</strong></td>
+                                            <td colspan="3">{deliveries_html}</td>
+                                        </tr>
+                                    </table>
                                 </td>
                             </tr>
                         </table>
