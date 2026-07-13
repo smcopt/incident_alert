@@ -584,7 +584,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None, d
                                 </td>
                                 <td align="right" valign="top">
                                     <span style="display: inline-block; padding: 6px 12px; background-color: #EC6B4D; color: #F5F3E8; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
-                                    <div style="margin-top: 8px;"><span style="display: inline-block; padding: 5px 10px; background-color: {badge_bg}; color: #ffffff; border-radius: 4px; font-weight: bold; font-size: 11px;">{status}</span></div>
+                                    <div style="margin-top: 8px;"><span style="display: inline-block; padding: 5px 10px; background-color: #4595AD; color: #ffffff; border-radius: 4px; font-weight: bold; font-size: 11px;">Response Status: {status}</span></div>
                                 </td>
                             </tr>
                         </table>
