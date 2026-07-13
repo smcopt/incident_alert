@@ -219,6 +219,7 @@ def run_workflow(request):
         new_records_for_sheet = []
         new_records_for_email = []
         new_deliveries = []      # flat repeat-group rows joined with parent core info
+        new_raw_records = []     # raw API records (native new-form columns) for the internal Excel
         all_keys = []
 
         if api_data:
@@ -333,6 +334,7 @@ def run_workflow(request):
                         "URL": rget(item, occ, 'Url', 0, '#')
                     }
                     new_records_for_email.append(email_incident)
+                    new_raw_records.append(item)   # native new-form columns for the internal Excel
 
                     # Flat repeat-group rows: each delivery joined with parent core info
                     for d in deliveries:
@@ -367,6 +369,8 @@ def run_workflow(request):
             new_records_for_sheet = ([header_row] if header_row else []) + data_rows
             new_records_for_email.sort(key=lambda d: d.get('Date of Incident', ''),
                                        reverse=SORT_NEWEST_FIRST)
+            new_raw_records.sort(key=lambda it: str(rget(it, build_occ(it), 'incident_date', 0, '')),
+                                 reverse=SORT_NEWEST_FIRST)
 
             sheet_service.spreadsheets().values().append(
                 spreadsheetId=SPREADSHEET_ID,
@@ -399,7 +403,8 @@ def run_workflow(request):
             # Send the data to the email logic
             data_to_excel = new_records_for_sheet[1:] if not sheet_header else new_records_for_sheet
             send_beautified_email(gmail_service, new_records_for_email, full_data=data_to_excel,
-                                  headers=output_header, deliveries=new_deliveries)
+                                  headers=output_header, deliveries=new_deliveries,
+                                  full_records=new_raw_records)
         else:
             send_beautified_email(gmail_service, None)
 
@@ -409,7 +414,7 @@ def run_workflow(request):
         print(f"Error: {e}")
         return f"Error: {e}", 500
 
-def send_beautified_email(service, summary_data, full_data=None, headers=None, deliveries=None):
+def send_beautified_email(service, summary_data, full_data=None, headers=None, deliveries=None, full_records=None):
     # 1. Force the server to use Amman Timezone (UTC+3)
     amman_tz = timezone(timedelta(hours=3))
     
@@ -448,11 +453,19 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None, d
     
 
 
-    # --- 1. ATTACH FULL INTERNAL EXCEL (main data + Response Deliveries sheet) ---
-    if full_data and headers:
+    # --- 1. ATTACH FULL INTERNAL EXCEL (raw new-form data + Response Deliveries sheet) ---
+    # Dump the records with their own native columns (in form order) rather than forcing
+    # them into the Google Sheet's header — that mismatch was the source of the "jumble".
+    if full_records:
+        # Column order = union of all record keys, preserving first-seen (form) order.
+        incident_cols = []
+        for rec in full_records:
+            for k in rec.keys():
+                if k not in incident_cols:
+                    incident_cols.append(k)
         full_buffer = io.BytesIO()
         with pd.ExcelWriter(full_buffer, engine='openpyxl') as writer:
-            pd.DataFrame(full_data, columns=headers).to_excel(writer, index=False, sheet_name='Incidents')
+            pd.DataFrame(full_records, columns=incident_cols).to_excel(writer, index=False, sheet_name='Incidents')
             _style_sheet(writer.sheets['Incidents'])
             df_del = pd.DataFrame(deliveries or [], columns=delivery_cols)
             df_del.to_excel(writer, index=False, sheet_name='Response Deliveries')
@@ -534,7 +547,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None, d
                     f"</tr>{_rows}</table>"
                 )
             else:
-                deliveries_html = "<span style='font-size:11px;color:#3D405B;'>No deliveries recorded yet.</span>"
+                deliveries_html = "<span style='font-size:11px; color:#3D405B;'>No deliveries recorded yet.</span>"
             # Per-item ask vs delivered vs remaining as a table
             needs = r.get('_needs') or []
             if needs:
