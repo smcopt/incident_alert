@@ -534,7 +534,7 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None, d
                     f"</tr>{_rows}</table>"
                 )
             else:
-                deliveries_html = "<span style='color:#3D405B;'>No deliveries recorded yet.</span>"
+                deliveries_html = "<span style='font-size:11px;color:#3D405B;'>No deliveries recorded yet.</span>"
             # Per-item ask vs delivered vs remaining as a table
             needs = r.get('_needs') or []
             if needs:
@@ -556,91 +556,87 @@ def send_beautified_email(service, summary_data, full_data=None, headers=None, d
                     f"</tr>{_nrows}</table>"
                 )
             else:
-                needs_html = "<span style='color:#3D405B;'>No itemised needs recorded.</span>"
+                needs_html = "<span style='font-size:11px; color:#3D405B;'>No itemised needs recorded.</span>"
             content_html += f"""
-            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px; border: 1px solid #D4A373; border-radius: 8px; font-family: Arial, sans-serif; background-color: #ffffff;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px; border: 1px solid #D4A373; border-radius: 8px; font-family: Arial, sans-serif; background-color: #ffffff; overflow: hidden;">
+                <!-- Identity header -->
                 <tr>
-                    <td style="padding: 15px; border-bottom: 1px solid #D4A373; background-color: #F5F3E8; border-radius: 8px 8px 0 0;">
+                    <td style="padding: 16px 18px; background-color: #F5F3E8; border-bottom: 1px solid #D4A373;">
                         <table width="100%" cellpadding="0" cellspacing="0">
                             <tr>
-                                <td align="left">
-                                    <h3 style="margin: 0; color: #1B657C; font-size: 18px;">{r.get('Site ID')} - {r.get('Site Name')}</h3>
-                                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #3D405B;">{r.get('Governorate')} - {r.get('Neighborhood')}</p>
+                                <td align="left" valign="top">
+                                    <h3 style="margin: 0; color: #1B657C; font-size: 18px;">{r.get('Site ID')} &middot; {r.get('Site Name')}</h3>
+                                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #3D405B;">{r.get('Governorate')} &nbsp;&rsaquo;&nbsp; {r.get('Neighborhood')}</p>
                                     <p style="margin: 2px 0 0 0; font-size: 12px; color: #3D405B;">Incident Date: {r.get('Date of Incident')}{(' &nbsp;|&nbsp; via ' + r.get('Report Type')) if r.get('Report Type') else ''}</p>
                                 </td>
                                 <td align="right" valign="top">
-                                    <span style="display: inline-block; padding: 6px 10px; background-color: #EC6B4D; color: #F5F3E8; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
+                                    <span style="display: inline-block; padding: 6px 12px; background-color: #EC6B4D; color: #F5F3E8; border-radius: 4px; font-weight: bold; font-size: 12px;">{r.get('Main Incident')}</span>
+                                    <div style="margin-top: 8px;"><span style="display: inline-block; padding: 5px 10px; background-color: {badge_bg}; color: #ffffff; border-radius: 4px; font-weight: bold; font-size: 11px;">{status}</span></div>
                                 </td>
                             </tr>
                         </table>
                     </td>
                 </tr>
+
+                <!-- OVERVIEW -->
+                <tr><td style="background-color: #1B657C; color: #F5F3E8; font-size: 12px; font-weight: bold; letter-spacing: 1.2px; padding: 7px 18px;">OVERVIEW</td></tr>
+                <tr><td style="padding: 6px 12px;">
+                    <table width="100%" cellpadding="7" cellspacing="0" style="font-size: 13px;">
+                        <tr>
+                            <td width="18%" style="color: #8a8a8a;">Agency</td><td width="32%" style="color: #3D405B;">{r.get('Agency Name')}</td>
+                            <td width="18%" style="color: #8a8a8a;">Reporter</td><td width="32%" style="color: #3D405B;">{r.get('Name of Reporter')}</td>
+                        </tr>
+                        <tr>
+                            <td style="color: #8a8a8a;">Contact</td><td style="color: #3D405B;">{r.get('Reporter Contact Information')}</td>
+                            <td style="color: #8a8a8a;">Site Name (Ar)</td><td style="color: #3D405B;">{r.get('Site Name (Arabic)')}</td>
+                        </tr>
+                    </table>
+                </td></tr>
+
+                <!-- SITUATION & IMPACT -->
+                <tr><td style="background-color: #1B657C; color: #F5F3E8; font-size: 12px; font-weight: bold; letter-spacing: 1.2px; padding: 7px 18px;">SITUATION &amp; IMPACT</td></tr>
+                <tr><td style="padding: 6px 12px;">
+                    <table width="100%" cellpadding="7" cellspacing="0" style="font-size: 13px;">
+                        <tr>
+                            <td width="25%" style="color: #8a8a8a;">Individuals Affected</td><td width="25%" style="color: #3D405B; font-weight: bold;">{r.get('Individuals Affected')}</td>
+                            <td width="25%" style="color: #8a8a8a;">Households Affected</td><td width="25%" style="color: #3D405B; font-weight: bold;">{r.get('Households Affected')}</td>
+                        </tr>
+                        <tr>
+                            <td style="color: #8a8a8a;">Shelters Destroyed</td><td style="color: #3D405B;">{r.get('Shelters Completely Damaged')}</td>
+                            <td style="color: #8a8a8a;">Shelters Damaged</td><td style="color: #3D405B;">{r.get('Shelters Partially Damaged')}</td>
+                        </tr>
+                        <tr>
+                            <td style="color: #8a8a8a;">HHs Sleeping Outside</td><td style="color: #3D405B;">{r.get('HHs Sleeping Outside Shelter')}</td>
+                            <td style="color: #8a8a8a; vertical-align: top;">Priority Needs</td><td style="color: #3D405B;">{r.get('Priority Needs')}</td>
+                        </tr>
+                    </table>
+                </td></tr>
+
+                <!-- INCIDENT NARRATIVE -->
+                <tr><td style="background-color: #1B657C; color: #F5F3E8; font-size: 12px; font-weight: bold; letter-spacing: 1.2px; padding: 7px 18px;">INCIDENT NARRATIVE</td></tr>
+                <tr><td style="padding: 12px 18px; font-size: 13px; color: #3D405B; line-height: 1.55;">{r.get('Details About the Incident')}</td></tr>
+
+                <!-- RESPONSE & GAP -->
+                <tr><td style="background-color: #EC6B4D; color: #F5F3E8; font-size: 12px; font-weight: bold; letter-spacing: 1.2px; padding: 7px 18px;">RESPONSE &amp; GAP</td></tr>
+                <tr><td style="padding: 12px 18px;">
+                    <table width="100%" cellpadding="4" cellspacing="0" style="font-size: 13px; margin-bottom: 10px;">
+                        <tr>
+                            <td width="18%" style="color: #8a8a8a;">Status</td>
+                            <td width="32%"><span style="display: inline-block; padding: 4px 10px; background-color: {badge_bg}; color: #ffffff; border-radius: 4px; font-weight: bold; font-size: 12px;">{status}</span></td>
+                            <td width="22%" style="color: #8a8a8a;">Remaining Need</td>
+                            <td width="28%" style="color: #3D405B; font-weight: bold;">{r.get('Has Remaining Need') or 'N/A'}{(' (' + r.get('Total Remaining (units)') + ' HH)') if r.get('Total Remaining (units)') else ''}</td>
+                        </tr>
+                    </table>
+                    <div style="font-size: 11px; color: #8a8a8a; text-transform: uppercase; letter-spacing: 1px; margin: 4px 0 2px 0;">Ask vs Response</div>
+                    {needs_html}
+                    <div style="font-size: 11px; color: #8a8a8a; text-transform: uppercase; letter-spacing: 1px; margin: 14px 0 2px 0;">Deliveries Logged</div>
+                    {deliveries_html}
+                </td></tr>
+
+                <!-- Footer -->
                 <tr>
-                    <td style="padding: 15px;">
-                        <table width="100%" cellpadding="6" cellspacing="0" style="font-size: 13px;">
-                            <tr>
-                                <td width="25%" style="color: #3D405B;"><strong>Site Name (Ar):</strong></td>
-                                <td width="25%" style="color: #3D405B;">{r.get('Site Name (Arabic)')}</td>
-                                <td width="25%" style="color: #3D405B;"><strong>Agency:</strong></td>
-                                <td width="25%" style="color: #3D405B;">{r.get('Agency Name')}</td>
-                            </tr>
-                            <tr>
-                                <td style="color: #3D405B;"><strong>Reporter:</strong></td>
-                                <td style="color: #3D405B;">{r.get('Name of Reporter')}</td>
-                                <td style="color: #3D405B;"><strong>Contact:</strong></td>
-                                <td style="color: #3D405B;">{r.get('Reporter Contact Information')}</td>
-                            </tr>
-                            <tr>
-                                <td style="color: #3D405B;"><strong>Ind. Affected:</strong></td>
-                                <td style="color: #3D405B;">{r.get('Individuals Affected')}</td>
-                                <td style="color: #3D405B;"><strong>HH Affected:</strong></td>
-                                <td style="color: #3D405B;">{r.get('Households Affected')}</td>
-                            </tr>
-                            <tr>
-                                <td style="color: #3D405B;"><strong>Shelters Destroyed:</strong></td>
-                                <td style="color: #3D405B;">{r.get('Shelters Completely Damaged')}</td>
-                                <td style="color: #3D405B;"><strong>Shelters Damaged:</strong></td>
-                                <td style="color: #3D405B;">{r.get('Shelters Partially Damaged')}</td>
-                            </tr>
-                            <tr>
-                                <td style="color: #3D405B;"><strong>HHs Sleeping Outside:</strong></td>
-                                <td style="color: #3D405B;">{r.get('HHs Sleeping Outside Shelter')}</td>
-                                <td style="color: #3D405B;"><strong>Priority Needs:</strong></td>
-                                <td style="color: #3D405B;">{r.get('Priority Needs')}</td>
-                            </tr>
-                            <tr>
-                                <td colspan="4" style="padding-top: 15px; border-top: 1px dashed #D4A373;">
-                                    <strong style="color: #3D405B;">Details:</strong><br>
-                                    <span style="color: #3D405B; line-height: 1.5; display: inline-block; margin-top: 5px;">{r.get('Details About the Incident')}</span>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td colspan="4" style="padding-top: 15px; border-top: 1px dashed #D4A373;">
-                                    <strong style="color: #1B657C; font-size: 14px;">RESPONSE</strong>
-                                    <table width="100%" cellpadding="6" cellspacing="0" style="font-size: 13px; margin-top: 6px;">
-                                        <tr>
-                                            <td width="25%" style="color: #3D405B;"><strong>Status:</strong></td>
-                                            <td width="25%"><span style="display: inline-block; padding: 3px 8px; background-color: {badge_bg}; color: #F5F3E8; border-radius: 4px; font-weight: bold; font-size: 12px;">{status}</span></td>
-                                            <td width="25%" style="color: #3D405B;"><strong>Remaining Need:</strong></td>
-                                            <td width="25%" style="color: #3D405B;">{r.get('Has Remaining Need') or 'N/A'}{(' (' + r.get('Total Remaining (units)') + ' HH)') if r.get('Total Remaining (units)') else ''}</td>
-                                        </tr>
-                                        <tr>
-                                            <td style="color: #3D405B; vertical-align: top;"><strong>Ask vs Response:</strong></td>
-                                            <td colspan="3">{needs_html}</td>
-                                        </tr>
-                                        <tr>
-                                            <td style="color: #3D405B; vertical-align: top;"><strong>Deliveries:</strong></td>
-                                            <td colspan="3">{deliveries_html}</td>
-                                        </tr>
-                                    </table>
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
-                <tr>
-                    <td style="padding: 15px; border-top: 1px solid #D4A373; background-color: #F5F3E8; border-radius: 0 0 8px 8px;" align="center">
-                        <a href="{r.get('URL')}" style="display: inline-block; padding: 10px 20px; background-color: #1B657C; color: #F5F3E8; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px;">Review Case</a>
+                    <td style="padding: 16px; border-top: 1px solid #D4A373; background-color: #F5F3E8;" align="center">
+                        <a href="{r.get('URL')}" style="display: inline-block; padding: 10px 22px; background-color: #1B657C; color: #F5F3E8; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px;">Review Case</a>
                     </td>
                 </tr>
             </table>
